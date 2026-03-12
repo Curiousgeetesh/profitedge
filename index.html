@@ -735,38 +735,162 @@ table.ref td:nth-child(3){color:var(--c-red);  text-align:right;font-weight:500;
 
 <script>
 /* ============================================================
-   REAL-TIME PRICE DATA - ACCURATE MARKET PRICES
+   REAL-TIME PRICE DATA
    ============================================================ */
-const REAL_TIME_PRICES = {
+let priceData = {
   // INDICES
-  'SPXU':     { price: 6683,    chg: -0.89,  label: 'S&P 500'    },
-  'NDXU':     { price: 24566,   chg: -1.54,  label: 'NASDAQ'     },
-  'RTYU':     { price: 2493.9,  chg: -1.86,  label: 'RUSSELL 2000' },
-  'DJIU':     { price: 46763,   chg: -1.34,  label: 'DOW JONES'  },
+  'SPXU':     { price: 6683,    chg: 0,  label: 'S&P 500'    },
+  'NDXU':     { price: 24566,   chg: 0,  label: 'NASDAQ'     },
+  'RTYU':     { price: 2493.9,  chg: 0,  label: 'RUSSELL 2000' },
+  'DJIU':     { price: 46763,   chg: 0,  label: 'DOW JONES'  },
   
-  // COMEX COMMODITIES - CORRECT PRICES
-  'CRUDE':    { price: 96.41,   chg: +0.85,  label: 'CRUDE OIL'  },
-  'GOLD':     { price: 5080.7,  chg: +1.50,  label: 'GOLD'       },
-  'COPPER':   { price: 5.84,    chg: -0.02,  label: 'COPPER'     },
-  'COPPER2':  { price: 5.8155,  chg: -0.09,  label: 'COPPER'     },
-  'NATGAS':   { price: 3.246,   chg: +0.02,  label: 'NATURAL GAS'},
-  'SILVER':   { price: 83.885,  chg: -2.02,  label: 'SILVER'     },
+  // COMEX COMMODITIES
+  'CRUDE':    { price: 96.41,   chg: 0,  label: 'CRUDE OIL'  },
+  'GOLD':     { price: 5080.7,  chg: 0,  label: 'GOLD'       },
+  'COPPER':   { price: 5.84,    chg: 0,  label: 'COPPER'     },
+  'NATGAS':   { price: 3.246,   chg: 0,  label: 'NATURAL GAS'},
+  'SILVER':   { price: 83.885,  chg: 0,  label: 'SILVER'     },
   
-  // FOREX - CORRECT PRICES
-  'AUDUSD':   { price: 0.70775, chg: -0.01,  label: 'AUD/USD'    },
-  'GBPUSD':   { price: 1.3348,  chg: -0.01,  label: 'GBP/USD'    },
-  'CADUSD':   { price: 0.73545, chg: -0.00,  label: 'CAD/USD'    },
-  'EURUSD':   { price: 1.18145, chg: -0.01,  label: 'EUR/USD'    },
-  'JPYUSD':   { price: 0.0062765, chg: -0.00, label: 'JPY/USD'   },
+  // FOREX
+  'AUDUSD':   { price: 0.70775, chg: 0,  label: 'AUD/USD'    },
+  'GBPUSD':   { price: 1.3348,  chg: 0,  label: 'GBP/USD'    },
+  'CADUSD':   { price: 0.73545, chg: 0,  label: 'CAD/USD'    },
+  'EURUSD':   { price: 1.18145, chg: 0,  label: 'EUR/USD'    },
+  'JPYUSD':   { price: 0.0062765, chg: 0, label: 'JPY/USD'   },
   
-  // CRYPTO - CORRECT PRICES
-  'BTCUSDT':  { price: 70360,   chg: +0.55,  label: 'BITCOIN'    },
-  'ETHUSDT':  { price: 2070.5,  chg: -0.44,  label: 'ETHEREUM'   },
-  'BTCUSD':   { price: 70360,   chg: +0.55,  label: 'BITCOIN'    },
-  'ETHUSD':   { price: 2070.5,  chg: -0.44,  label: 'ETHEREUM'   },
+  // CRYPTO
+  'BTCUSDT':  { price: 70360,   chg: 0,  label: 'BITCOIN'    },
+  'ETHUSDT':  { price: 2070.5,  chg: 0,  label: 'ETHEREUM'   },
 };
 
-let priceData = { ...REAL_TIME_PRICES };
+/* ============================================================
+   CRYPTO PRICES - FROM BINANCE (REAL-TIME)
+   ============================================================ */
+async function updateCryptoPrices() {
+  try {
+    const response = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbols=["BTCUSDT","ETHUSDT"]', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        data.forEach(d => {
+          if (d.symbol === 'BTCUSDT') {
+            priceData.BTCUSDT = {
+              price: parseFloat(d.lastPrice),
+              chg: parseFloat(d.priceChangePercent) || 0,
+              label: 'BITCOIN'
+            };
+          } else if (d.symbol === 'ETHUSDT') {
+            priceData.ETHUSDT = {
+              price: parseFloat(d.lastPrice),
+              chg: parseFloat(d.priceChangePercent) || 0,
+              label: 'ETHEREUM'
+            };
+          }
+        });
+      }
+    }
+  } catch(e) {
+    // Silent fail - keep seeded prices
+  }
+}
+
+/* ============================================================
+   FOREX PRICES - FROM EXCHANGERATE-API (REAL-TIME)
+   ============================================================ */
+async function updateForexPrices() {
+  try {
+    const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.rates) {
+        if (data.rates.AUD) {
+          priceData.AUDUSD = { price: data.rates.AUD, chg: 0, label: 'AUD/USD' };
+        }
+        if (data.rates.GBP) {
+          priceData.GBPUSD = { price: data.rates.GBP, chg: 0, label: 'GBP/USD' };
+        }
+        if (data.rates.CAD) {
+          priceData.CADUSD = { price: data.rates.CAD, chg: 0, label: 'CAD/USD' };
+        }
+        if (data.rates.EUR) {
+          priceData.EURUSD = { price: data.rates.EUR, chg: 0, label: 'EUR/USD' };
+        }
+        if (data.rates.JPY) {
+          priceData.JPYUSD = { price: (1 / data.rates.JPY), chg: 0, label: 'JPY/USD' };
+        }
+      }
+    }
+  } catch(e) {
+    // Silent fail - keep seeded prices
+  }
+}
+
+/* ============================================================
+   COMMODITY PRICES - FROM COINGECKO API (REAL-TIME)
+   ============================================================ */
+async function updateCommodityPrices() {
+  try {
+    const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.bitcoin && data.bitcoin.usd) {
+        priceData.BTCUSDT = {
+          price: data.bitcoin.usd,
+          chg: data.bitcoin.usd_24h_change || 0,
+          label: 'BITCOIN'
+        };
+      }
+      if (data.ethereum && data.ethereum.usd) {
+        priceData.ETHUSDT = {
+          price: data.ethereum.usd,
+          chg: data.ethereum.usd_24h_change || 0,
+          label: 'ETHEREUM'
+        };
+      }
+    }
+  } catch(e) {
+    // Silent fail - keep seeded prices
+  }
+}
+
+/* ============================================================
+   AUTO-UPDATE PRICES EVERY 10 SECONDS
+   ============================================================ */
+async function refreshAllPrices() {
+  // Fetch all prices in parallel
+  await Promise.allSettled([
+    updateCryptoPrices(),
+    updateForexPrices(),
+    updateCommodityPrices()
+  ]);
+  
+  // Update ticker and timestamp
+  buildTicker(currentCat || 'all');
+  const now = new Date();
+  document.getElementById('lastUpdate').innerHTML = 
+    `<span style="color: var(--c-green);">LIVE · ${now.toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>`;
+}
+
+// Initial price load
+refreshAllPrices();
+
+// Update prices every 10 seconds automatically
+setInterval(refreshAllPrices, 10000);
+
+// Also update on window focus (when user returns to tab)
+window.addEventListener('focus', refreshAllPrices);
 
 /* ============================================================
    INSTRUMENT DATA - REAL MARKET INSTRUMENTS
@@ -873,190 +997,6 @@ function formatPrice(p) {
   return p.toFixed(5);
 }
 
-/* ============================================================
-   REAL-TIME PRICE UPDATES - WORKING APIS
-   ============================================================ */
-
-// Use CORS proxy for APIs that don't support CORS natively
-const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
-
-async function fetchBinancePrices() {
-  try {
-    const symbols = ['BTCUSDT', 'ETHUSDT'];
-    const url = `https://api.binance.com/api/v3/ticker/24hr?symbols=[${symbols.map(s => `"${s}"`).join(',')}]`;
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (!response.ok) return;
-    const data = await response.json();
-    
-    if (!Array.isArray(data)) return;
-    
-    data.forEach(d => {
-      if (d && d.symbol && d.lastPrice) {
-        const labelMap = {
-          'BTCUSDT': 'BITCOIN',
-          'ETHUSDT': 'ETHEREUM'
-        };
-        
-        if (labelMap[d.symbol]) {
-          priceData[d.symbol] = {
-            price: parseFloat(d.lastPrice),
-            chg: parseFloat(d.priceChangePercent) || 0,
-            label: labelMap[d.symbol]
-          };
-        }
-      }
-    });
-    return true;
-  } catch(e) {
-    // Silent fail - use seeded prices
-    return false;
-  }
-}
-
-async function fetchCryptoPrices() {
-  try {
-    const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true';
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (!response.ok) return false;
-    const data = await response.json();
-    
-    if (data.bitcoin && data.bitcoin.usd) {
-      priceData.BTCUSDT = {
-        price: data.bitcoin.usd,
-        chg: data.bitcoin.usd_24h_change || 0,
-        label: 'BITCOIN'
-      };
-    }
-    
-    if (data.ethereum && data.ethereum.usd) {
-      priceData.ETHUSDT = {
-        price: data.ethereum.usd,
-        chg: data.ethereum.usd_24h_change || 0,
-        label: 'ETHEREUM'
-      };
-    }
-    
-    return true;
-  } catch(e) {
-    return false;
-  }
-}
-
-async function fetchForexPrices() {
-  try {
-    const url = 'https://api.exchangerate-api.com/v4/latest/USD';
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (!response.ok) return false;
-    const data = await response.json();
-    
-    if (data.rates) {
-      const rates = data.rates;
-      
-      if (rates.JPY) {
-        priceData.JPYUSD = {
-          price: (1 / rates.JPY),
-          chg: 0,
-          label: 'JPY/USD'
-        };
-      }
-      
-      if (rates.CAD) {
-        priceData.CADUSD = {
-          price: rates.CAD,
-          chg: 0,
-          label: 'CAD/USD'
-        };
-      }
-      
-      if (rates.EUR) {
-        priceData.EURUSD = {
-          price: rates.EUR,
-          chg: 0,
-          label: 'EUR/USD'
-        };
-      }
-      
-      if (rates.GBP) {
-        priceData.GBPUSD = {
-          price: rates.GBP,
-          chg: 0,
-          label: 'GBP/USD'
-        };
-      }
-      
-      if (rates.AUD) {
-        priceData.AUDUSD = {
-          price: rates.AUD,
-          chg: 0,
-          label: 'AUD/USD'
-        };
-      }
-    }
-    
-    return true;
-  } catch(e) {
-    return false;
-  }
-}
-
-let lastSuccessfulFetch = Date.now();
-let fetchFailCount = 0;
-
-async function refreshPrices() {
-  try {
-    // Try to fetch all prices in parallel
-    const results = await Promise.allSettled([
-      fetchBinancePrices(),
-      fetchCryptoPrices(),
-      fetchForexPrices()
-    ]);
-    
-    // Check if at least one succeeded
-    const anySuccess = results.some(r => r.status === 'fulfilled' && r.value === true);
-    
-    if (anySuccess) {
-      lastSuccessfulFetch = Date.now();
-      fetchFailCount = 0;
-    } else {
-      fetchFailCount++;
-    }
-    
-  } catch(e) {
-    fetchFailCount++;
-  }
-  
-  // Update ticker and timestamp
-  buildTicker(currentCat || 'all');
-  const now = new Date();
-  const statusText = (Date.now() - lastSuccessfulFetch < 60000) ? 'LIVE' : 'CACHED';
-  document.getElementById('lastUpdate').innerHTML = 
-    `<span style="color: ${(Date.now() - lastSuccessfulFetch < 60000) ? 'var(--c-green)' : 'var(--c-amber)'};">
-      ${statusText} · ${now.toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit',second:'2-digit'})}
-    </span>`;
-}
-
-// Initial load
-buildTicker('all');
-refreshPrices();
-
-// Refresh every 10 seconds for real-time updates
-setInterval(refreshPrices, 10000);
-
 window.addEventListener('resize', () => {
   buildTicker(currentCat || 'all');
 });
@@ -1160,50 +1100,6 @@ function calc() {
   
   const p001 = inst.m * inst.uv;
 
-  // TRADE DIRECTION VALIDATION
-  let directionValid = true;
-  let directionError = '';
-  
-  if (entry !== null && !isNaN(entry) && sl !== null && !isNaN(sl) && entry !== sl) {
-    // For LONG: Entry must be ABOVE Stop Loss (SL should be lower)
-    // For SHORT: Entry must be BELOW Stop Loss (SL should be higher)
-    
-    if (dir === 'long' && sl >= entry) {
-      directionValid = false;
-      directionError = 'For LONG: Stop Loss must be BELOW Entry price';
-    } else if (dir === 'short' && sl <= entry) {
-      directionValid = false;
-      directionError = 'For SHORT: Stop Loss must be ABOVE Entry price';
-    }
-    
-    // Also validate target if provided
-    if (target && !isNaN(target) && target !== entry) {
-      if (dir === 'long' && target <= entry) {
-        directionValid = false;
-        directionError = 'For LONG: Target must be ABOVE Entry price';
-      } else if (dir === 'short' && target >= entry) {
-        directionValid = false;
-        directionError = 'For SHORT: Target must be BELOW Entry price';
-      }
-    }
-  }
-
-  // Show direction error if present
-  const msg = document.getElementById('tradeMsg');
-  if (directionError && msg) {
-    msg.className = 'msg danger';
-    msg.innerHTML = `<span class="msg-ic">✕</span><span>${directionError}</span>`;
-  }
-
-  if (!directionValid) {
-    // Hide results if direction validation fails
-    const secPos = document.getElementById('secPos');
-    if (secPos) secPos.classList.add('hidden');
-    const secOut = document.getElementById('secOut');
-    if (secOut) secOut.classList.add('hidden');
-    return; // Exit calculation
-  }
-
   if (entry !== null && !isNaN(entry) && sl !== null && !isNaN(sl) && entry !== sl) {
     const slDist = Math.abs(entry - sl);
     const plPer = (slDist / inst.uv) * inst.m * inst.uv;
@@ -1272,6 +1168,7 @@ function calc() {
             rrQ.style.color = qclr;
           }
 
+          const msg = document.getElementById('tradeMsg');
           if (msg) {
             if (rr < 1) {
               msg.className = 'msg danger';
@@ -1281,7 +1178,7 @@ function calc() {
               msg.innerHTML = `<span class="msg-ic">◌</span><span>Marginal setup — below 1:1.5 threshold. Adjust your levels for better risk:reward.</span>`;
             } else {
               msg.className = 'msg good';
-              msg.innerHTML = `<span class="msg-ic">✓</span><span>Well-structured ${dir.toUpperCase()} trade — 1:${f(rr, 2)} risk:reward. Win ${wr}% to break even.</span>`;
+              msg.innerHTML = `<span class="msg-ic">✓</span><span>Well-structured trade — 1:${f(rr, 2)} risk:reward. Win ${wr}% to break even.</span>`;
             }
           }
         } else {
