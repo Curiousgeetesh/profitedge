@@ -1075,6 +1075,50 @@ function calc() {
   
   const p001 = inst.m * inst.uv;
 
+  // TRADE DIRECTION VALIDATION
+  let directionValid = true;
+  let directionError = '';
+  
+  if (entry !== null && !isNaN(entry) && sl !== null && !isNaN(sl) && entry !== sl) {
+    // For LONG: Entry must be ABOVE Stop Loss (SL should be lower)
+    // For SHORT: Entry must be BELOW Stop Loss (SL should be higher)
+    
+    if (dir === 'long' && sl >= entry) {
+      directionValid = false;
+      directionError = 'For LONG: Stop Loss must be BELOW Entry price';
+    } else if (dir === 'short' && sl <= entry) {
+      directionValid = false;
+      directionError = 'For SHORT: Stop Loss must be ABOVE Entry price';
+    }
+    
+    // Also validate target if provided
+    if (target && !isNaN(target) && target !== entry) {
+      if (dir === 'long' && target <= entry) {
+        directionValid = false;
+        directionError = 'For LONG: Target must be ABOVE Entry price';
+      } else if (dir === 'short' && target >= entry) {
+        directionValid = false;
+        directionError = 'For SHORT: Target must be BELOW Entry price';
+      }
+    }
+  }
+
+  // Show direction error if present
+  const msg = document.getElementById('tradeMsg');
+  if (directionError && msg) {
+    msg.className = 'msg danger';
+    msg.innerHTML = `<span class="msg-ic">✕</span><span>${directionError}</span>`;
+  }
+
+  if (!directionValid) {
+    // Hide results if direction validation fails
+    const secPos = document.getElementById('secPos');
+    if (secPos) secPos.classList.add('hidden');
+    const secOut = document.getElementById('secOut');
+    if (secOut) secOut.classList.add('hidden');
+    return; // Exit calculation
+  }
+
   if (entry !== null && !isNaN(entry) && sl !== null && !isNaN(sl) && entry !== sl) {
     const slDist = Math.abs(entry - sl);
     const plPer = (slDist / inst.uv) * inst.m * inst.uv;
@@ -1143,7 +1187,6 @@ function calc() {
             rrQ.style.color = qclr;
           }
 
-          const msg = document.getElementById('tradeMsg');
           if (msg) {
             if (rr < 1) {
               msg.className = 'msg danger';
@@ -1153,7 +1196,7 @@ function calc() {
               msg.innerHTML = `<span class="msg-ic">◌</span><span>Marginal setup — below 1:1.5 threshold. Adjust your levels for better risk:reward.</span>`;
             } else {
               msg.className = 'msg good';
-              msg.innerHTML = `<span class="msg-ic">✓</span><span>Well-structured trade — 1:${f(rr, 2)} risk:reward. Win ${wr}% to break even.</span>`;
+              msg.innerHTML = `<span class="msg-ic">✓</span><span>Well-structured ${dir.toUpperCase()} trade — 1:${f(rr, 2)} risk:reward. Win ${wr}% to break even.</span>`;
             }
           }
         } else {
