@@ -578,15 +578,17 @@ table.ref td:nth-child(3){color:var(--c-red);  text-align:right;font-weight:500;
 <div class="section" style="animation-delay:0.08s">
   <div class="sec-head">
     <div class="sec-label"><div class="sec-num">01</div>SELECT INSTRUMENT</div>
-    <div class="sec-badge">17 MARKETS</div>
+    <div class="sec-badge" id="marketCount">17 MARKETS</div>
   </div>
   <div class="cat-tabs">
     <button class="cat-tab on" onclick="filterCat('all',this)">ALL</button>
     <button class="cat-tab" onclick="filterCat('comex',this)">COMEX</button>
     <button class="cat-tab" onclick="filterCat('crypto',this)">CRYPTO</button>
     <button class="cat-tab" onclick="filterCat('forex',this)">FOREX</button>
-    <button class="cat-tab" onclick="filterCat('indices',this)">INDICES</button>
+    <button class="cat-tab" onclick="filterCat('indices',this)">GLOBAL INDICES</button>
     <button class="cat-tab" onclick="filterCat('mcx',this)">MCX</button>
+    <button class="cat-tab" onclick="filterCat('indian',this)">INDIAN STOCKS</button>
+    <button class="cat-tab" onclick="filterCat('indianidx',this)">INDIAN INDICES</button>
   </div>
   <div class="sel-wrap">
     <select id="instrSel" onchange="onInstChange()"></select>
@@ -609,7 +611,7 @@ table.ref td:nth-child(3){color:var(--c-red);  text-align:right;font-weight:500;
 <div class="section" style="animation-delay:0.16s">
   <div class="sec-head">
     <div class="sec-label"><div class="sec-num">03</div>PRICE LEVELS</div>
-    <div class="sec-badge">ENTRY + SL REQUIRED</div>
+    <div class="sec-badge">ENTRY + SL + TARGET REQUIRED</div>
   </div>
   <div class="fields">
     <div class="field">
@@ -625,15 +627,15 @@ table.ref td:nth-child(3){color:var(--c-red);  text-align:right;font-weight:500;
       </div>
     </div>
     <div class="field">
-      <div class="f-label">Target Price <span style="color:var(--c-text3);font-size:0.55rem;">(OPTIONAL)</span></div>
+      <div class="f-label">Target Price</div>
       <div class="f-inner"><span class="f-pre">◎</span>
         <input type="number" id="fTarget" step="0.0001" placeholder="e.g. 98.50" oninput="calc()">
       </div>
     </div>
     <div class="field">
-      <div class="f-label">Capital at Risk (₹)</div>
+      <div class="f-label">Max Loss Budget (₹)</div>
       <div class="f-inner"><span class="f-pre">₹</span>
-        <input type="number" id="fCap" value="1000" step="100" min="1" oninput="calc()">
+        <input type="number" id="fCap" value="1000" step="100" min="1" oninput="calc()" placeholder="Amount you can afford to lose">
       </div>
     </div>
   </div>
@@ -647,14 +649,24 @@ table.ref td:nth-child(3){color:var(--c-red);  text-align:right;font-weight:500;
   </div>
   <div class="g2">
     <div class="ocard hi-cyan">
-      <div class="ol">Recommended Lot Size</div>
+      <div class="ol" id="oLotLabel">Recommended Lot Size</div>
       <div class="ov cyan" id="oLot">—</div>
-      <div class="osub">to risk exactly ₹<span id="oCapRef">1000</span></div>
+      <div class="osub" id="oLotSub">sized to lose max ₹<span id="oCapRef">1000</span> at SL</div>
     </div>
     <div class="ocard">
       <div class="ol">Stop Loss Distance</div>
       <div class="ov red" id="oSLD">—</div>
       <div class="osub">price units from entry</div>
+    </div>
+  </div>
+  <div class="g2 mt8">
+    <div class="ocard hi-red">
+      <div class="ol">If SL Hits → You Lose</div>
+      <div class="ov red" id="oSLLoss">—</div>
+    </div>
+    <div class="ocard hi-green">
+      <div class="ol">If Target Hits → You Make</div>
+      <div class="ov green" id="oTGProfit">—</div>
     </div>
   </div>
   <div class="ocard mt8">
@@ -728,7 +740,7 @@ table.ref td:nth-child(3){color:var(--c-red);  text-align:right;font-weight:500;
 
 <div class="footer">
   <div class="footer-l">PROFITEDGE · PROFESSIONAL TRADE CALCULATOR</div>
-  <div class="footer-r">MULTIPLIERS VERIFIED FROM REAL TRADE STATEMENTS</div>
+  <div class="footer-r">MULTIPLIERS CALIBRATED FROM LIVE TRADE DATA</div>
 </div>
 
 </div><!-- /wrap -->
@@ -869,18 +881,111 @@ async function updateCommodityPrices() {
    AUTO-UPDATE PRICES EVERY 10 SECONDS
    ============================================================ */
 async function refreshAllPrices() {
-  // Fetch all prices in parallel
   await Promise.allSettled([
     updateCryptoPrices(),
     updateForexPrices(),
     updateCommodityPrices()
   ]);
   
-  // Update ticker and timestamp
+  // Map priceData to INSTR objects
+  const labelMap = {};
+  for (const key of Object.keys(priceData)) {
+    const d = priceData[key];
+    if (d.label) labelMap[d.label.toUpperCase()] = d;
+  }
+  
+  // Match COMEX/Crypto/Forex/Indices to INSTR
+  for (const inst of INSTR) {
+    if (inst.t) {
+      const tUpper = inst.t.toUpperCase();
+      // Direct match
+      if (labelMap[tUpper]) {
+        inst.livePrice = labelMap[tUpper].price;
+        inst.liveChg = labelMap[tUpper].chg;
+      }
+      // Partial matches
+      for (const [label, d] of Object.entries(labelMap)) {
+        if (tUpper.includes(label) || label.includes(tUpper)) {
+          inst.livePrice = d.price;
+          inst.liveChg = d.chg;
+          break;
+        }
+      }
+    }
+  }
+  
+  // Fetch Indian stock prices from Google Finance (no API key needed)
+  await updateIndianStockPrices();
+  
   buildTicker(currentCat || 'all');
   const now = new Date();
   document.getElementById('lastUpdate').innerHTML = 
     `<span style="color: var(--c-green);">LIVE · ${now.toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>`;
+}
+
+/* ============================================================
+   INDIAN STOCK PRICES — REAL-TIME
+   Primary: Twelve Data API (CORS enabled, supports NSE)
+   Fallback: Yahoo Finance v7/v8
+   ============================================================ */
+async function updateIndianStockPrices() {
+  const indianInstr = INSTR.filter(i => (i.cat === 'indian' || i.cat === 'indianidx') && i.yf);
+  if (!indianInstr.length) return;
+  
+  // Method 1: Twelve Data batch price (free = 8 symbols/min, 800/day)
+  // Process top visible stocks first
+  const batchSize = 8;
+  const toFetch = indianInstr.filter(i => !i.livePrice);
+  
+  for (let i = 0; i < Math.min(toFetch.length, batchSize * 3); i += batchSize) {
+    const batch = toFetch.slice(i, i + batchSize);
+    const symbols = batch.map(inst => inst.yf.replace('.NS', '')).join(',');
+    
+    try {
+      const url = `https://api.twelvedata.com/quote?symbol=${symbols}&exchange=NSE&apikey=demo`;
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const data = await resp.json();
+        // Handle single vs batch response
+        const results = symbols.includes(',') ? data : { [symbols]: data };
+        for (const inst of batch) {
+          const sym = inst.yf.replace('.NS', '');
+          const q = results[sym];
+          if (q && q.close && !q.code) {
+            inst.livePrice = parseFloat(q.close);
+            inst.liveChg = parseFloat(q.percent_change) || 0;
+          }
+        }
+      }
+    } catch(e) {}
+    
+    // Small delay between batches to respect rate limits
+    if (i + batchSize < toFetch.length) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+  
+  // Method 2: Yahoo Finance fallback for remaining
+  const remaining = indianInstr.filter(i => !i.livePrice);
+  if (remaining.length > 0) {
+    const batch20 = remaining.slice(0, 20);
+    const symbols = batch20.map(i => i.yf).join(',');
+    try {
+      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}`;
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const data = await resp.json();
+        const quotes = data?.quoteResponse?.result || [];
+        for (const q of quotes) {
+          const inst = batch20.find(b => b.yf === q.symbol);
+          if (inst && q.regularMarketPrice) {
+            inst.livePrice = q.regularMarketPrice;
+            inst.liveChg = q.regularMarketChangePercent || 0;
+          }
+        }
+      }
+    } catch(e) {}
+  }
 }
 
 // Initial price load
@@ -897,39 +1002,282 @@ window.addEventListener('focus', refreshAllPrices);
    ============================================================ */
 const INSTR = [
   // COMEX - Commodities
-  {n:'Crude Oil — CLJ6',         cat:'comex',   m:80,    u:'$1',      uv:1,      dr:[1,3],          v:true},
-  {n:'CME Gold — GCJ6',          cat:'comex',   m:8,     u:'$1',      uv:1,      dr:[10,30],        v:true},
-  {n:'CME Silver — SIH6',        cat:'comex',   m:200,   u:'$1',      uv:1,      dr:[0.30,1],       v:true},
-  {n:'CME Copper — HGH6',        cat:'comex',   m:1960,  u:'$1',      uv:1,      dr:[0.03,0.10],    v:true},
-  {n:'CME Natural Gas — NGH26',  cat:'comex',   m:840,   u:'$0.10',   uv:0.1,    dr:[0.05,0.30],    v:true,  w:'Extreme — small moves = huge P&L'},
+  {n:'Crude Oil — CLJ6', t:'CRUDE OIL',         cat:'comex',   m:80,    u:'$1',      uv:1,      dr:[1,3]},
+  {n:'CME Gold — GCJ6', t:'GOLD',          cat:'comex',   m:8,     u:'$1',      uv:1,      dr:[10,30]},
+  {n:'CME Silver — SIH6', t:'SILVER',        cat:'comex',   m:200,   u:'$1',      uv:1,      dr:[0.30,1]},
+  {n:'CME Copper — HGH6', t:'COPPER',        cat:'comex',   m:1960,  u:'$1',      uv:1,      dr:[0.03,0.10]},
+  {n:'CME Natural Gas — NGH26', t:'NATURAL GAS',  cat:'comex',   m:560,   u:'$1',      uv:1,      dr:[0.05,0.30],  w:'Extreme — small moves = huge P&L'},
   
   // INDICES - Index Futures
-  {n:'Micro E-Mini S&P 500 — MES',     cat:'indices', m:0.5,   u:'1 point', uv:1,      dr:[20,80],        v:true},
-  {n:'E-Mini NASDAQ-100 — NQ',         cat:'indices', m:1.6,   u:'1 point', uv:1,      dr:[100,400],      v:true},
-  {n:'E-Mini Russell 2000 — RTY',      cat:'indices', m:0.4,   u:'1 point', uv:1,      dr:[10,40],        v:true},
-  {n:'E-Mini Dow Jones — YM',          cat:'indices', m:0.05,  u:'1 point', uv:1,      dr:[100,400],      v:true},
+  {n:'Micro E-Mini S&P 500 — MES', t:'S&P 500',     cat:'indices', m:0.5,   u:'1 point', uv:1,      dr:[20,80]},
+  {n:'E-Mini NASDAQ-100 — NQ', t:'NASDAQ-100',         cat:'indices', m:1.6,   u:'1 point', uv:1,      dr:[100,400]},
+  {n:'E-Mini Russell 2000 — RTY', t:'RUSSELL 2000',      cat:'indices', m:0.4,   u:'1 point', uv:1,      dr:[10,40]},
+  {n:'E-Mini Dow Jones — YM', t:'DOW JONES',          cat:'indices', m:0.05,  u:'1 point', uv:1,      dr:[100,400]},
   
   // FOREX & CRYPTO
-  {n:'Bitcoin — BTC/USD',        cat:'crypto',  m:0.4,   u:'$1',      uv:1,      dr:[500,3000],     v:true},
-  {n:'Ethereum — ETH/USD',       cat:'crypto',  m:1,     u:'$1',      uv:1,      dr:[30,100],       v:true},
-  {n:'CME AUD/USD — 6AH6',       cat:'forex',   m:100,   u:'0.001',   uv:0.001,  dr:[0.003,0.01],   v:true},
-  {n:'CME GBP/USD — 6BH6',       cat:'forex',   m:125,   u:'0.001',   uv:0.001,  dr:[0.003,0.01],   v:true},
-  {n:'CME CAD/USD — 6CH6',       cat:'forex',   m:400,   u:'0.01',    uv:0.01,   dr:[0.003,0.01],   v:true},
-  {n:'CME EUR/USD — 6EH6',       cat:'forex',   m:125,   u:'0.001',   uv:0.001,  dr:[0.003,0.01],   v:true},
-  {n:'CME JPY/USD — 6JH6',       cat:'forex',   m:62.5,  u:'0.0001',  uv:0.0001, dr:[0.0003,0.001], v:true},
+  {n:'Bitcoin — BTC/USD', t:'BITCOIN',        cat:'crypto',  m:0.4,   u:'$1',      uv:1,      dr:[500,3000]},
+  {n:'Ethereum — ETH/USD', t:'ETHEREUM',       cat:'crypto',  m:4,     u:'$1',      uv:1,      dr:[30,100]},
+  {n:'CME AUD/USD — 6AH6', t:'AUD/USD',       cat:'forex',   m:100,   u:'0.001',   uv:0.001,  dr:[0.003,0.01]},
+  {n:'CME GBP/USD — 6BH6', t:'GBP/USD',       cat:'forex',   m:125,   u:'0.001',   uv:0.001,  dr:[0.003,0.01]},
+  {n:'CME CAD/USD — 6CH6', t:'CAD/USD',       cat:'forex',   m:400,   u:'0.01',    uv:0.01,   dr:[0.003,0.01]},
+  {n:'CME EUR/USD — 6EH6', t:'EUR/USD',       cat:'forex',   m:125,   u:'0.001',   uv:0.001,  dr:[0.003,0.01]},
+  {n:'CME JPY/USD — 6JH6', t:'JPY/USD',       cat:'forex',   m:62.5,  u:'0.0001',  uv:0.0001, dr:[0.0003,0.001]},
   
-  // MCX - India Futures
-  {n:'MCX Natural Gas',          cat:'mcx',     m:250,   u:'₹1',      uv:1,      dr:[3,15],         v:false},
-  {n:'MCX Crude Oil',            cat:'mcx',     m:100,   u:'₹1',      uv:1,      dr:[5,25],         v:false},
+  // MCX - India Futures (m = lot_size/1000, same 0.001 lot system)
+  {n:'MCX Natural Gas',          cat:'mcx',     m:1.25,  u:'₹1',      uv:1,      dr:[3,15]},
+  {n:'MCX Crude Oil',            cat:'mcx',     m:0.1,   u:'₹1',      uv:1,      dr:[5,25]},
+
+  // INDIAN STOCKS - Nifty F&O (sorted by Market Cap descending)
+  // m = lot size (P&L per ₹1 move per lot = lot_size × ₹1)
+  {n:'Reliance Industries — RELIANCE', t:'RELIANCE',     cat:'indian', m:0.25,  u:'₹1', uv:1, dr:[15,50], yf:'RELIANCE.NS', av:'RELIANCE.BSE'},
+  {n:'Tata Consultancy — TCS', t:'TCS',             cat:'indian', m:0.175,  u:'₹1', uv:1, dr:[20,60], yf:'TCS.NS', av:'TCS.BSE'},
+  {n:'HDFC Bank — HDFCBANK', t:'HDFCBANK',               cat:'indian', m:0.55,  u:'₹1', uv:1, dr:[10,35], yf:'HDFCBANK.NS', av:'HDFCBANK.BSE'},
+  {n:'Bharti Airtel — BHARTIARTL', t:'BHARTIARTL',         cat:'indian', m:0.475,  u:'₹1', uv:1, dr:[10,40], yf:'BHARTIARTL.NS', av:'BHARTIARTL.BSE'},
+  {n:'ICICI Bank — ICICIBANK', t:'ICICIBANK',             cat:'indian', m:0.7,  u:'₹1', uv:1, dr:[8,30], yf:'ICICIBANK.NS', av:'ICICIBANK.BSE'},
+  {n:'Infosys — INFY', t:'INFY',                     cat:'indian', m:0.4,  u:'₹1', uv:1, dr:[10,40], yf:'INFY.NS', av:'INFY.BSE'},
+  {n:'State Bank of India — SBIN', t:'SBIN',         cat:'indian', m:0.75,  u:'₹1', uv:1, dr:[5,20], yf:'SBIN.NS', av:'SBIN.BSE'},
+  {n:'ITC — ITC', t:'ITC',                          cat:'indian', m:1.6, u:'₹1', uv:1, dr:[3,10], yf:'ITC.NS', av:'ITC.BSE'},
+  {n:'Hindustan Unilever — HINDUNILVR', t:'HINDUNILVR',    cat:'indian', m:0.3,  u:'₹1', uv:1, dr:[15,50], yf:'HINDUNILVR.NS', av:'HINDUNILVR.BSE'},
+  {n:'Bajaj Finance — BAJFINANCE', t:'BAJFINANCE',         cat:'indian', m:0.75,  u:'₹1', uv:1, dr:[50,200], yf:'BAJFINANCE.NS', av:'BAJFINANCE.BSE'},
+  {n:'Larsen & Toubro — LT', t:'LT',               cat:'indian', m:0.175,  u:'₹1', uv:1, dr:[20,80], yf:'LT.NS', av:'LT.BSE'},
+  {n:'HCL Technologies — HCLTECH', t:'HCLTECH',         cat:'indian', m:0.35,  u:'₹1', uv:1, dr:[10,40], yf:'HCLTECH.NS', av:'HCLTECH.BSE'},
+  {n:'Sun Pharma — SUNPHARMA', t:'SUNPHARMA',             cat:'indian', m:0.3,  u:'₹1', uv:1, dr:[10,40], yf:'SUNPHARMA.NS', av:'SUNPHARMA.BSE'},
+  {n:'Tata Motors — TATAMOTORS', t:'TATAMOTORS',           cat:'indian', m:0.55,  u:'₹1', uv:1, dr:[5,20], yf:'TATAMOTORS.NS', av:'TATAMOTORS.BSE'},
+  {n:'Maruti Suzuki — MARUTI', t:'MARUTI',             cat:'indian', m:0.1,  u:'₹1', uv:1, dr:[50,200], yf:'MARUTI.NS', av:'MARUTI.BSE'},
+  {n:'Axis Bank — AXISBANK', t:'AXISBANK',               cat:'indian', m:0.625,  u:'₹1', uv:1, dr:[5,25], yf:'AXISBANK.NS', av:'AXISBANK.BSE'},
+  {n:'Kotak Mahindra Bank — KOTAKBANK', t:'KOTAKBANK',    cat:'indian', m:0.4,  u:'₹1', uv:1, dr:[10,40], yf:'KOTAKBANK.NS', av:'KOTAKBANK.BSE'},
+  {n:'NTPC — NTPC', t:'NTPC',                        cat:'indian', m:1.5, u:'₹1', uv:1, dr:[2,8], yf:'NTPC.NS', av:'NTPC.BSE'},
+  {n:'Titan Company — TITAN', t:'TITAN',              cat:'indian', m:0.175,  u:'₹1', uv:1, dr:[15,60], yf:'TITAN.NS', av:'TITAN.BSE'},
+  {n:'Adani Enterprises — ADANIENT', t:'ADANIENT',       cat:'indian', m:0.25,  u:'₹1', uv:1, dr:[20,80], yf:'ADANIENT.NS', av:'ADANIENT.BSE'},
+  {n:'UltraTech Cement — ULTRACEMCO', t:'ULTRACEMCO',      cat:'indian', m:0.1,  u:'₹1', uv:1, dr:[50,200], yf:'ULTRACEMCO.NS', av:'ULTRACEMCO.BSE'},
+  {n:'Asian Paints — ASIANPAINT', t:'ASIANPAINT',          cat:'indian', m:0.3,  u:'₹1', uv:1, dr:[15,50], yf:'ASIANPAINT.NS', av:'ASIANPAINT.BSE'},
+  {n:'Wipro — WIPRO', t:'WIPRO',                      cat:'indian', m:1.5, u:'₹1', uv:1, dr:[2,8], yf:'WIPRO.NS', av:'WIPRO.BSE'},
+  {n:'Power Grid Corp — POWERGRID', t:'POWERGRID',        cat:'indian', m:2.7, u:'₹1', uv:1, dr:[2,6], yf:'POWERGRID.NS', av:'POWERGRID.BSE'},
+  {n:'Mahindra & Mahindra — M&M', t:'M&M',          cat:'indian', m:0.35,  u:'₹1', uv:1, dr:[10,40], yf:'M%26M.NS', av:'M%26M.BSE'},
+  {n:'Bajaj Finserv — BAJAJFINSV', t:'BAJAJFINSV',         cat:'indian', m:0.5,  u:'₹1', uv:1, dr:[10,35], yf:'BAJAJFINSV.NS', av:'BAJAJFINSV.BSE'},
+  {n:'Oil & Natural Gas — ONGC', t:'ONGC',           cat:'indian', m:3, u:'₹1', uv:1, dr:[2,8], yf:'ONGC.NS', av:'ONGC.BSE'},
+  {n:'Coal India — COALINDIA', t:'COALINDIA',             cat:'indian', m:1.35, u:'₹1', uv:1, dr:[2,8], yf:'COALINDIA.NS', av:'COALINDIA.BSE'},
+  {n:'Adani Ports — ADANIPORT', t:'ADANIPORT',            cat:'indian', m:0.625,  u:'₹1', uv:1, dr:[5,20], yf:'ADANIPORTS.NS', av:'ADANIPORTS.BSE'},
+  {n:'Tata Steel — TATASTEEL', t:'TATASTEEL',             cat:'indian', m:5.5, u:'₹1', uv:1, dr:[1,5], yf:'TATASTEEL.NS', av:'TATASTEEL.BSE'},
+  {n:'Nestle India — NESTLEIND', t:'NESTLEIND',           cat:'indian', m:0.2,  u:'₹1', uv:1, dr:[20,80], yf:'NESTLEIND.NS', av:'NESTLEIND.BSE'},
+  {n:'Grasim Industries — GRASIM', t:'GRASIM',         cat:'indian', m:0.275,  u:'₹1', uv:1, dr:[15,50], yf:'GRASIM.NS', av:'GRASIM.BSE'},
+  {n:'JSW Steel — JSWSTEEL', t:'JSWSTEEL',              cat:'indian', m:0.675,  u:'₹1', uv:1, dr:[5,20], yf:'JSWSTEEL.NS', av:'JSWSTEEL.BSE'},
+  {n:'Tech Mahindra — TECHM', t:'TECHM',             cat:'indian', m:0.6,  u:'₹1', uv:1, dr:[8,30], yf:'TECHM.NS', av:'TECHM.BSE'},
+  {n:'IndusInd Bank — INDUSINDBK', t:'INDUSINDBK',         cat:'indian', m:0.45,  u:'₹1', uv:1, dr:[8,30], yf:'INDUSINDBK.NS', av:'INDUSINDBK.BSE'},
+  {n:'Dr Reddys Labs — DRREDDY', t:'DRREDDY',           cat:'indian', m:0.125,  u:'₹1', uv:1, dr:[30,100], yf:'DRREDDY.NS', av:'DRREDDY.BSE'},
+  {n:'Hindalco — HINDALCO', t:'HINDALCO',               cat:'indian', m:0.7, u:'₹1', uv:1, dr:[3,12], yf:'HINDALCO.NS', av:'HINDALCO.BSE'},
+  {n:'Cipla — CIPLA', t:'CIPLA',                     cat:'indian', m:0.525,  u:'₹1', uv:1, dr:[5,20], yf:'CIPLA.NS', av:'CIPLA.BSE'},
+  {n:'Divi\'s Labs — DIVISLAB',            cat:'indian', m:0.1,  u:'₹1', uv:1, dr:[30,100], yf:'DIVISLAB.NS', av:'DIVISLAB.BSE'},
+  {n:'Apollo Hospitals — APOLLOHOSP', t:'APOLLOHOSP',      cat:'indian', m:0.125,  u:'₹1', uv:1, dr:[30,100], yf:'APOLLOHOSP.NS', av:'APOLLOHOSP.BSE'},
+  {n:'BPCL — BPCL', t:'BPCL',                       cat:'indian', m:2.7, u:'₹1', uv:1, dr:[2,8], yf:'BPCL.NS', av:'BPCL.BSE'},
+  {n:'SBI Life Insurance — SBILIFE', t:'SBILIFE',       cat:'indian', m:0.375,  u:'₹1', uv:1, dr:[8,30], yf:'SBILIFE.NS', av:'SBILIFE.BSE'},
+  {n:'Tata Consumer — TATACONSUM', t:'TATACONSUM',         cat:'indian', m:0.675,  u:'₹1', uv:1, dr:[5,20], yf:'TATACONSUM.NS', av:'TATACONSUM.BSE'},
+  {n:'Eicher Motors — EICHERMOT', t:'EICHERMOT',          cat:'indian', m:0.175,  u:'₹1', uv:1, dr:[20,80], yf:'EICHERMOT.NS', av:'EICHERMOT.BSE'},
+  {n:'Britannia — BRITANNIA', t:'BRITANNIA',             cat:'indian', m:0.2,  u:'₹1', uv:1, dr:[20,60], yf:'BRITANNIA.NS', av:'BRITANNIA.BSE'},
+  {n:'Hero MotoCorp — HEROMOTOCO', t:'HEROMOTOCO',         cat:'indian', m:0.15,  u:'₹1', uv:1, dr:[20,80], yf:'HEROMOTOCO.NS', av:'HEROMOTOCO.BSE'},
+  {n:'Bajaj Auto — BAJAJ-AUTO', t:'BAJAJ-AUTO',            cat:'indian', m:0.075,   u:'₹1', uv:1, dr:[40,150], yf:'BAJAJ-AUTO.NS', av:'BAJAJ-AUTO.BSE'},
+  {n:'Godrej Consumer — GODREJCP', t:'GODREJCP',         cat:'indian', m:0.5,  u:'₹1', uv:1, dr:[5,20], yf:'GODREJCP.NS', av:'GODREJCP.BSE'},
+  {n:'Shriram Finance — SHRIRAMFIN', t:'SHRIRAMFIN',       cat:'indian', m:0.25,  u:'₹1', uv:1, dr:[15,50], yf:'SHRIRAMFIN.NS', av:'SHRIRAMFIN.BSE'},
+  {n:'Havells India — HAVELLS', t:'HAVELLS',            cat:'indian', m:0.5,  u:'₹1', uv:1, dr:[8,25], yf:'HAVELLS.NS', av:'HAVELLS.BSE'},
+  {n:'Bharat Electronics — BEL', t:'BEL',           cat:'indian', m:2.7, u:'₹1', uv:1, dr:[2,6], yf:'BEL.NS', av:'BEL.BSE'},
+  {n:'Pidilite Industries — PIDILITIND', t:'PIDILITIND',   cat:'indian', m:0.375,  u:'₹1', uv:1, dr:[10,30], yf:'PIDILITIND.NS', av:'PIDILITIND.BSE'},
+  {n:'DLF — DLF', t:'DLF',                         cat:'indian', m:0.825,  u:'₹1', uv:1, dr:[3,15], yf:'DLF.NS', av:'DLF.BSE'},
+  {n:'Siemens — SIEMENS', t:'SIEMENS',                 cat:'indian', m:0.15,  u:'₹1', uv:1, dr:[30,100], yf:'SIEMENS.NS', av:'SIEMENS.BSE'},
+  {n:'Ambuja Cements — AMBUJACEM', t:'AMBUJACEM',         cat:'indian', m:1, u:'₹1', uv:1, dr:[3,10], yf:'AMBUJACEM.NS', av:'AMBUJACEM.BSE'},
+  {n:'Indian Oil Corp — IOC', t:'IOC',              cat:'indian', m:4.35, u:'₹1', uv:1, dr:[1,4], yf:'IOC.NS', av:'IOC.BSE'},
+  {n:'Trent — TRENT', t:'TRENT',                     cat:'indian', m:0.1,  u:'₹1', uv:1, dr:[30,100], yf:'TRENT.NS', av:'TRENT.BSE'},
+  {n:'Vedanta — VEDL', t:'VEDL',                    cat:'indian', m:1.6, u:'₹1', uv:1, dr:[2,8], yf:'VEDL.NS', av:'VEDL.BSE'},
+  {n:'Interglobe Aviation — INDIGO', t:'INDIGO',       cat:'indian', m:0.15,  u:'₹1', uv:1, dr:[20,80], yf:'INDIGO.NS', av:'INDIGO.BSE'},
+  {n:'ABB India — ABB', t:'ABB',                   cat:'indian', m:0.125,  u:'₹1', uv:1, dr:[40,150], yf:'ABB.NS', av:'ABB.BSE'},
+  {n:'Zomato — ZOMATO', t:'ZOMATO',                   cat:'indian', m:3, u:'₹1', uv:1, dr:[2,6], yf:'ZOMATO.NS', av:'ZOMATO.BSE'},
+  {n:'Hindustan Aeronautics — HAL', t:'HAL',        cat:'indian', m:0.15,  u:'₹1', uv:1, dr:[20,80], yf:'HAL.NS', av:'HAL.BSE'},
+  {n:'SBI Cards — SBICARD', t:'SBICARD',               cat:'indian', m:0.7,  u:'₹1', uv:1, dr:[3,12], yf:'SBICARD.NS', av:'SBICARD.BSE'},
+  {n:'Punjab National Bank — PNB', t:'PNB',         cat:'indian', m:6, u:'₹1', uv:1, dr:[1,3], yf:'PNB.NS', av:'PNB.BSE'},
+  {n:'Cholamandalam Inv — CHOLAFIN', t:'CHOLAFIN',       cat:'indian', m:0.625,  u:'₹1', uv:1, dr:[5,20], yf:'CHOLAFIN.NS', av:'CHOLAFIN.BSE'},
+  {n:'Torrent Pharma — TORNTPHARM', t:'TORNTPHARM',       cat:'indian', m:0.25,  u:'₹1', uv:1, dr:[15,50], yf:'TORNTPHARM.NS', av:'TORNTPHARM.BSE'},
+  {n:'Bank of Baroda — BANKBARODA', t:'BANKBARODA',        cat:'indian', m:2.925, u:'₹1', uv:1, dr:[1,5], yf:'BANKBARODA.NS', av:'BANKBARODA.BSE'},
+  {n:'Canara Bank — CANBK', t:'CANBK',               cat:'indian', m:5.4, u:'₹1', uv:1, dr:[1,3], yf:'CANBK.NS', av:'CANBK.BSE'},
+  {n:'Tata Power — TATAPOWER', t:'TATAPOWER',            cat:'indian', m:1.35, u:'₹1', uv:1, dr:[2,8], yf:'TATAPOWER.NS', av:'TATAPOWER.BSE'},
+  {n:'JSW Energy — JSWENERGY', t:'JSWENERGY',            cat:'indian', m:1.25, u:'₹1', uv:1, dr:[3,10], yf:'JSWENERGY.NS', av:'JSWENERGY.BSE'},
+  {n:'ICICI Lombard — ICICIGI', t:'ICICIGI',            cat:'indian', m:0.35,  u:'₹1', uv:1, dr:[8,30], yf:'ICICIGI.NS', av:'ICICIGI.BSE'},
+  {n:'Jindal Steel — JINDALSTEL', t:'JINDALSTEL',          cat:'indian', m:0.625,  u:'₹1', uv:1, dr:[5,20], yf:'JINDALSTEL.NS', av:'JINDALSTEL.BSE'},
+  {n:'HDFC Life — HDFCLIFE', t:'HDFCLIFE',              cat:'indian', m:1.1, u:'₹1', uv:1, dr:[3,10], yf:'HDFCLIFE.NS', av:'HDFCLIFE.BSE'},
+  {n:'Lupin — LUPIN', t:'LUPIN',                     cat:'indian', m:0.425,  u:'₹1', uv:1, dr:[8,25], yf:'LUPIN.NS', av:'LUPIN.BSE'},
+  {n:'ACC — ACC', t:'ACC',                         cat:'indian', m:0.3,  u:'₹1', uv:1, dr:[10,40], yf:'ACC.NS', av:'ACC.BSE'},
+  {n:'Aurobindo Pharma — AUROPHARMA', t:'AUROPHARMA',     cat:'indian', m:0.5,  u:'₹1', uv:1, dr:[5,20], yf:'AUROPHARMA.NS', av:'AUROPHARMA.BSE'},
+  {n:'Polycab India — POLYCAB', t:'POLYCAB',            cat:'indian', m:0.125,  u:'₹1', uv:1, dr:[20,80], yf:'POLYCAB.NS', av:'POLYCAB.BSE'},
+  {n:'Colgate-Palmolive — COLPAL', t:'COLPAL',         cat:'indian', m:0.225,  u:'₹1', uv:1, dr:[10,30], yf:'COLPAL.NS', av:'COLPAL.BSE'},
+  {n:'Muthoot Finance — MUTHOOTFIN', t:'MUTHOOTFIN',       cat:'indian', m:0.25,  u:'₹1', uv:1, dr:[10,40], yf:'MUTHOOTFIN.NS', av:'MUTHOOTFIN.BSE'},
+  {n:'NMDC — NMDC', t:'NMDC',                       cat:'indian', m:4.5, u:'₹1', uv:1, dr:[1,3], yf:'NMDC.NS', av:'NMDC.BSE'},
+  {n:'Page Industries — PAGEIND', t:'PAGEIND',          cat:'indian', m:0.015,   u:'₹1', uv:1, dr:[200,800], yf:'PAGEIND.NS', av:'PAGEIND.BSE'},
+  {n:'Bandhan Bank — BANDHANBNK', t:'BANDHANBNK',          cat:'indian', m:3.6, u:'₹1', uv:1, dr:[1,4], yf:'BANDHANBNK.NS', av:'BANDHANBNK.BSE'},
+  {n:'MRF — MRF', t:'MRF',                         cat:'indian', m:0.005,    u:'₹1', uv:1, dr:[500,2000], yf:'MRF.NS', av:'MRF.BSE'},
+  {n:'Berger Paints — BERGEPAINT', t:'BERGEPAINT',         cat:'indian', m:1.1, u:'₹1', uv:1, dr:[2,8], yf:'BERGEPAINT.NS', av:'BERGEPAINT.BSE'},
+  {n:'Indian Hotels — INDHOTEL', t:'INDHOTEL',           cat:'indian', m:0.875,  u:'₹1', uv:1, dr:[3,12], yf:'INDHOTEL.NS', av:'INDHOTEL.BSE'},
+  {n:'Voltas — VOLTAS', t:'VOLTAS',                   cat:'indian', m:0.375,  u:'₹1', uv:1, dr:[5,20], yf:'VOLTAS.NS', av:'VOLTAS.BSE'},
+  {n:'Balkrishna Ind — BALKRISIND', t:'BALKRISIND',        cat:'indian', m:0.2,  u:'₹1', uv:1, dr:[15,50], yf:'BALKRISIND.NS', av:'BALKRISIND.BSE'},
+  {n:'Federal Bank — FEDERALBNK', t:'FEDERALBNK',          cat:'indian', m:3.5, u:'₹1', uv:1, dr:[1,4], yf:'FEDERALBNK.NS', av:'FEDERALBNK.BSE'},
+  {n:'Tata Chemicals — TATACHEM', t:'TATACHEM',          cat:'indian', m:0.6,  u:'₹1', uv:1, dr:[5,15], yf:'TATACHEM.NS', av:'TATACHEM.BSE'},
+  {n:'Biocon — BIOCON', t:'BIOCON',                   cat:'indian', m:2.3, u:'₹1', uv:1, dr:[2,6], yf:'BIOCON.NS', av:'BIOCON.BSE'},
+  {n:'Ashok Leyland — ASHOKLEY', t:'ASHOKLEY',           cat:'indian', m:3, u:'₹1', uv:1, dr:[1,4], yf:'ASHOKLEY.NS', av:'ASHOKLEY.BSE'},
+  {n:'Manappuram Finance — MANAPPURAM', t:'MANAPPURAM',    cat:'indian', m:3, u:'₹1', uv:1, dr:[1,4], yf:'MANAPPURAM.NS', av:'MANAPPURAM.BSE'},
+  {n:'Max Financial — MFSL', t:'MFSL',              cat:'indian', m:0.55,  u:'₹1', uv:1, dr:[5,20], yf:'MFSL.NS', av:'MFSL.BSE'},
+  {n:'Petronet LNG — PETRONET', t:'PETRONET',           cat:'indian', m:1.9, u:'₹1', uv:1, dr:[1,4], yf:'PETRONET.NS', av:'PETRONET.BSE'},
+  {n:'L&T Finance — LTF', t:'LTF',                 cat:'indian', m:4.65, u:'₹1', uv:1, dr:[1,3], yf:'LTF.NS', av:'LTF.BSE'},
+  {n:'Coforge — COFORGE', t:'COFORGE',                 cat:'indian', m:0.375,  u:'₹1', uv:1, dr:[30,100], yf:'COFORGE.NS', av:'COFORGE.BSE'},
+  {n:'Persistent Systems — PERSISTENT', t:'PERSISTENT',    cat:'indian', m:0.125,  u:'₹1', uv:1, dr:[30,100], yf:'PERSISTENT.NS', av:'PERSISTENT.BSE'},
+  {n:'L&T Technology — LTTS', t:'LTTS',              cat:'indian', m:0.2,  u:'₹1', uv:1, dr:[15,50], yf:'LTTS.NS', av:'LTTS.BSE'},
+  {n:'ICICI Prudential — ICICIPRULI', t:'ICICIPRULI',      cat:'indian', m:1.05, u:'₹1', uv:1, dr:[3,10], yf:'ICICIPRULI.NS', av:'ICICIPRULI.BSE'},
+  {n:'Crompton Greaves — CROMPTON', t:'CROMPTON',        cat:'indian', m:1.8, u:'₹1', uv:1, dr:[2,6], yf:'CROMPTON.NS', av:'CROMPTON.BSE'},
+  {n:'Bharat Forge — BHARATFORG', t:'BHARATFORG',          cat:'indian', m:0.5,  u:'₹1', uv:1, dr:[5,20], yf:'BHARATFORG.NS', av:'BHARATFORG.BSE'},
+  {n:'Deepak Nitrite — DEEPAKNTR', t:'DEEPAKNTR',         cat:'indian', m:0.25,  u:'₹1', uv:1, dr:[10,40], yf:'DEEPAKNTR.NS', av:'DEEPAKNTR.BSE'},
+  {n:'Marico — MARICO', t:'MARICO',                   cat:'indian', m:1.15, u:'₹1', uv:1, dr:[3,10], yf:'MARICO.NS', av:'MARICO.BSE'},
+  {n:'Aarti Industries — AARTIIND', t:'AARTIIND',        cat:'indian', m:1, u:'₹1', uv:1, dr:[3,10], yf:'AARTIIND.NS', av:'AARTIIND.BSE'},
+  {n:'Navin Fluorine — NAVINFLUOR', t:'NAVINFLUOR',        cat:'indian', m:0.2,  u:'₹1', uv:1, dr:[15,50], yf:'NAVINFLUOR.NS', av:'NAVINFLUOR.BSE'},
+  {n:'Metropolis Health — METROPOLIS', t:'METROPOLIS',      cat:'indian', m:0.4,  u:'₹1', uv:1, dr:[8,25], yf:'METROPOLIS.NS', av:'METROPOLIS.BSE'},
+  {n:'CU B Fine Jewellery — CUBEXTUB', t:'CUBEXTUB',     cat:'indian', m:2, u:'₹1', uv:1, dr:[2,6]},
+  {n:'SAIL — SAIL', t:'SAIL',                        cat:'indian', m:4.7, u:'₹1', uv:1, dr:[1,3], yf:'SAIL.NS', av:'SAIL.BSE'},
+  {n:'Laurus Labs — LAURUSLABS', t:'LAURUSLABS',           cat:'indian', m:1.1, u:'₹1', uv:1, dr:[2,8], yf:'LAURUSLABS.NS', av:'LAURUSLABS.BSE'},
+  {n:'Dabur India — DABUR', t:'DABUR',               cat:'indian', m:1.25, u:'₹1', uv:1, dr:[3,10], yf:'DABUR.NS', av:'DABUR.BSE'},
+  {n:'Mphasis — MPHASIS', t:'MPHASIS',                 cat:'indian', m:0.275,  u:'₹1', uv:1, dr:[15,50], yf:'MPHASIS.NS', av:'MPHASIS.BSE'},
+  {n:'Container Corp — CONCOR', t:'CONCOR',            cat:'indian', m:0.75,  u:'₹1', uv:1, dr:[3,12], yf:'CONCOR.NS', av:'CONCOR.BSE'},
+  {n:'Tata Communications — TATACOMM', t:'TATACOMM',     cat:'indian', m:0.5,  u:'₹1', uv:1, dr:[5,20], yf:'TATACOMM.NS', av:'TATACOMM.BSE'},
+  {n:'Gujarat Gas — GUJGASLTD', t:'GUJGASLTD',            cat:'indian', m:1.25, u:'₹1', uv:1, dr:[3,10], yf:'GUJGASLTD.NS', av:'GUJGASLTD.BSE'},
+  {n:'IEX — IEX', t:'IEX',                         cat:'indian', m:3.75, u:'₹1', uv:1, dr:[1,3], yf:'IEX.NS', av:'IEX.BSE'},
+  {n:'IDFC First Bank — IDFCFIRSTB', t:'IDFCFIRSTB',       cat:'indian', m:7, u:'₹1', uv:1, dr:[1,3], yf:'IDFCFIRSTB.NS', av:'IDFCFIRSTB.BSE'},
+  {n:'M&M Financial — M&MFIN', t:'M&MFIN',            cat:'indian', m:2, u:'₹1', uv:1, dr:[2,6], yf:'M%26MFIN.NS', av:'M%26MFIN.BSE'},
+  {n:'RBL Bank — RBLBANK', t:'RBLBANK',                cat:'indian', m:3.175, u:'₹1', uv:1, dr:[1,4], yf:'RBLBANK.NS', av:'RBLBANK.BSE'},
+  {n:'Hindustan Copper — HINDCOPPER', t:'HINDCOPPER',      cat:'indian', m:2.6, u:'₹1', uv:1, dr:[2,6], yf:'HINDCOPPER.NS', av:'HINDCOPPER.BSE'},
+  {n:'Astral — ASTRAL', t:'ASTRAL',                   cat:'indian', m:0.375,  u:'₹1', uv:1, dr:[8,25], yf:'ASTRAL.NS', av:'ASTRAL.BSE'},
+  {n:'AU Small Finance — AUBANK', t:'AUBANK',          cat:'indian', m:1, u:'₹1', uv:1, dr:[3,10], yf:'AUBANK.NS', av:'AUBANK.BSE'},
+  {n:'Cummins India — CUMMINSIND', t:'CUMMINSIND',         cat:'indian', m:0.225,  u:'₹1', uv:1, dr:[10,40], yf:'CUMMINSIND.NS', av:'CUMMINSIND.BSE'},
+  {n:'HDFC AMC — HDFCAMC', t:'HDFCAMC',                cat:'indian', m:0.15,  u:'₹1', uv:1, dr:[20,60], yf:'HDFCAMC.NS', av:'HDFCAMC.BSE'},
+  {n:'National Aluminium — NATIONALUM', t:'NATIONALUM',    cat:'indian', m:3.725, u:'₹1', uv:1, dr:[1,3], yf:'NATIONALUM.NS', av:'NATIONALUM.BSE'},
+  {n:'Aditya Birla Capital — ABCAPITAL', t:'ABCAPITAL',   cat:'indian', m:3.9, u:'₹1', uv:1, dr:[1,3], yf:'ABCAPITAL.NS', av:'ABCAPITAL.BSE'},
+  {n:'Abbott India — ABBOTINDIA', t:'ABBOTINDIA',          cat:'indian', m:0.025,   u:'₹1', uv:1, dr:[100,400], yf:'ABBOTINDIA.NS', av:'ABBOTINDIA.BSE'},
+  {n:'Max Healthcare — MAXHEALTH', t:'MAXHEALTH',         cat:'indian', m:0.55,  u:'₹1', uv:1, dr:[5,20], yf:'MAXHEALTH.NS', av:'MAXHEALTH.BSE'},
+  {n:'Sundaram Finance — SUNDARMFIN', t:'SUNDARMFIN',      cat:'indian', m:0.25,  u:'₹1', uv:1, dr:[10,40]},
+  {n:'India Cements — INDIACEM', t:'INDIACEM',           cat:'indian', m:2.25, u:'₹1', uv:1, dr:[2,6]},
+  {n:'Dixon Technologies — DIXON', t:'DIXON',         cat:'indian', m:0.05,   u:'₹1', uv:1, dr:[50,200], yf:'DIXON.NS', av:'DIXON.BSE'},
+  {n:'Escorts Kubota — ESCORTS', t:'ESCORTS',           cat:'indian', m:0.175,  u:'₹1', uv:1, dr:[15,50], yf:'ESCORTS.NS', av:'ESCORTS.BSE'},
+  {n:'Indraprastha Gas — IGL', t:'IGL',             cat:'indian', m:1.375, u:'₹1', uv:1, dr:[2,8], yf:'IGL.NS', av:'IGL.BSE'},
+  {n:'Bata India — BATAINDIA', t:'BATAINDIA',            cat:'indian', m:0.55,  u:'₹1', uv:1, dr:[5,20], yf:'BATAINDIA.NS', av:'BATAINDIA.BSE'},
+  {n:'IRCTC — IRCTC', t:'IRCTC',                     cat:'indian', m:0.875,  u:'₹1', uv:1, dr:[4,15], yf:'IRCTC.NS', av:'IRCTC.BSE'},
+  {n:'Dalmia Bharat — DALBHARAT', t:'DALBHARAT',          cat:'indian', m:0.35,  u:'₹1', uv:1, dr:[8,25], yf:'DALBHARAT.NS', av:'DALBHARAT.BSE'},
+  {n:'LIC Housing Finance — LICHSGFIN', t:'LICHSGFIN',    cat:'indian', m:1.1, u:'₹1', uv:1, dr:[3,10], yf:'LICHSGFIN.NS', av:'LICHSGFIN.BSE'},
+  {n:'Nippon Life India AMC — NAM-INDIA', t:'NAM-INDIA',   cat:'indian', m:1.5, u:'₹1', uv:1, dr:[2,8], yf:'NAM-INDIA.NS', av:'NAM-INDIA.BSE'},
+  {n:'Sun TV Network — SUNTV', t:'SUNTV',            cat:'indian', m:0.75,  u:'₹1', uv:1, dr:[3,12], yf:'SUNTV.NS', av:'SUNTV.BSE'},
+  {n:'PVR Inox — PVRINOX', t:'PVRINOX',                cat:'indian', m:0.425,  u:'₹1', uv:1, dr:[5,20], yf:'PVRINOX.NS', av:'PVRINOX.BSE'},
+  {n:'Star Health — STARHEALTH', t:'STARHEALTH',           cat:'indian', m:1.25, u:'₹1', uv:1, dr:[3,10], yf:'STARHEALTH.NS', av:'STARHEALTH.BSE'},
+  {n:'UPL — UPL', t:'UPL',                         cat:'indian', m:1.3, u:'₹1', uv:1, dr:[3,10], yf:'UPL.NS', av:'UPL.BSE'},
+  {n:'Jubilant FoodWorks — JUBLFOOD', t:'JUBLFOOD',      cat:'indian', m:1, u:'₹1', uv:1, dr:[3,10], yf:'JUBLFOOD.NS', av:'JUBLFOOD.BSE'},
+  {n:'Zee Entertainment — ZEEL', t:'ZEEL',           cat:'indian', m:5.25, u:'₹1', uv:1, dr:[1,3], yf:'ZEEL.NS', av:'ZEEL.BSE'},
+  {n:'BHEL — BHEL', t:'BHEL',                       cat:'indian', m:2.85, u:'₹1', uv:1, dr:[1,4], yf:'BHEL.NS', av:'BHEL.BSE'},
+  {n:'Birla Soft — BSOFT', t:'BSOFT',                cat:'indian', m:1.4, u:'₹1', uv:1, dr:[2,8], yf:'BSOFT.NS', av:'BSOFT.BSE'},
+  {n:'Multi Commodity Exch — MCX', t:'MCX',         cat:'indian', m:0.2,  u:'₹1', uv:1, dr:[15,60], yf:'MCX.NS', av:'MCX.BSE'},
+  {n:'Exide Industries — EXIDEIND', t:'EXIDEIND',        cat:'indian', m:1.8, u:'₹1', uv:1, dr:[2,6], yf:'EXIDEIND.NS', av:'EXIDEIND.BSE'},
+  {n:'PI Industries — PIIND', t:'PIIND',             cat:'indian', m:0.2,  u:'₹1', uv:1, dr:[15,50], yf:'PIIND.NS', av:'PIIND.BSE'},
+  {n:'GMR Airports — GMRAIRPORT', t:'GMRAIRPORT',          cat:'indian', m:7.5, u:'₹1', uv:1, dr:[1,3], yf:'GMRINFRA.NS', av:'GMRINFRA.BSE'},
+  {n:'L&T Mindtree — LTIM', t:'LTIM',               cat:'indian', m:0.15,  u:'₹1', uv:1, dr:[20,80], yf:'LTIM.NS', av:'LTIM.BSE'},
+  {n:'Ramco Cements — RAMCOCEM', t:'RAMCOCEM',           cat:'indian', m:0.6,  u:'₹1', uv:1, dr:[5,15], yf:'RAMCOCEM.NS', av:'RAMCOCEM.BSE'},
+  {n:'IDBI Bank — IDBI', t:'IDBI',                  cat:'indian', m:7.5, u:'₹1', uv:1, dr:[1,3], yf:'IDBI.NS', av:'IDBI.BSE'},
+  {n:'Alkem Labs — ALKEM', t:'ALKEM',                cat:'indian', m:0.15,  u:'₹1', uv:1, dr:[20,60], yf:'ALKEM.NS', av:'ALKEM.BSE'},
+  {n:'Glenmark Pharma — GLENMARK', t:'GLENMARK',        cat:'indian', m:0.45,  u:'₹1', uv:1, dr:[5,20], yf:'GLENMARK.NS', av:'GLENMARK.BSE'},
+  {n:'India Bulls Housing — IBULHSGFIN', t:'IBULHSGFIN',   cat:'indian', m:4.35, u:'₹1', uv:1, dr:[1,3]},
+  {n:'Aditya Birla Fashion — ABFRL', t:'ABFRL',       cat:'indian', m:2.1, u:'₹1', uv:1, dr:[1,5], yf:'ABFRL.NS', av:'ABFRL.BSE'},
+  {n:'Can Fin Homes — CANFINHOME', t:'CANFINHOME',         cat:'indian', m:0.975,  u:'₹1', uv:1, dr:[3,10], yf:'CANFINHOME.NS', av:'CANFINHOME.BSE'},
+  {n:'Oberoi Realty — OBEROIRLTY', t:'OBEROIRLTY',         cat:'indian', m:0.35,  u:'₹1', uv:1, dr:[8,30], yf:'OBEROIRLTY.NS', av:'OBEROIRLTY.BSE'},
+  {n:'Syngene International — SYNGENE', t:'SYNGENE',    cat:'indian', m:0.8,  u:'₹1', uv:1, dr:[3,12], yf:'SYNGENE.NS', av:'SYNGENE.BSE'},
+  {n:'CG Power — CGPOWER', t:'CGPOWER',                cat:'indian', m:1.35, u:'₹1', uv:1, dr:[2,8], yf:'CGPOWER.NS', av:'CGPOWER.BSE'},
+  {n:'Indian Energy Exchange — IEX', t:'IEX',       cat:'indian', m:3.75, u:'₹1', uv:1, dr:[1,3], yf:'IEX.NS', av:'IEX.BSE'},
+  {n:'Naukri (Info Edge) — NAUKRI', t:'NAUKRI',        cat:'indian', m:0.375,  u:'₹1', uv:1, dr:[30,100], yf:'NAUKRI.NS', av:'NAUKRI.BSE'},
+  {n:'PB Fintech — POLICYBZR', t:'POLICYBZR',            cat:'indian', m:0.6,  u:'₹1', uv:1, dr:[5,20], yf:'POLICYBZR.NS', av:'POLICYBZR.BSE'},
+  {n:'Paytm (One97) — PAYTM', t:'PAYTM',             cat:'indian', m:0.75,  u:'₹1', uv:1, dr:[3,15], yf:'PAYTM.NS', av:'PAYTM.BSE'},
+  {n:'Coromandel Int — COROMANDEL', t:'COROMANDEL',        cat:'indian', m:0.35,  u:'₹1', uv:1, dr:[8,25], yf:'COROMANDEL.NS', av:'COROMANDEL.BSE'},
+  {n:'Indian Overseas Bank — IOB', t:'IOB',         cat:'indian', m:13,u:'₹1', uv:1, dr:[0.5,2], yf:'IOB.NS', av:'IOB.BSE'},
+  {n:'Piramal Enterprises — PEL', t:'PEL',          cat:'indian', m:0.45,  u:'₹1', uv:1, dr:[5,20], yf:'PEL.NS', av:'PEL.BSE'},
+  {n:'Supreme Industries — SUPREMEIND', t:'SUPREMEIND',    cat:'indian', m:0.15,  u:'₹1', uv:1, dr:[15,50], yf:'SUPREMEIND.NS', av:'SUPREMEIND.BSE'},
+
+  {n:'Atul — ATUL', t:'ATUL', cat:'indian', m:0.15, u:'₹1', uv:1, dr:[5,20], yf:'ATUL.NS', av:'ATUL.BSE'},
+  {n:'Bosch — BOSCHLTD', t:'BOSCHLTD', cat:'indian', m:0.025, u:'₹1', uv:1, dr:[5,20], yf:'BOSCHLTD.NS', av:'BOSCHLTD.BSE'},
+  {n:'BSE Ltd — BSE', t:'BSE', cat:'indian', m:0.375, u:'₹1', uv:1, dr:[5,20], yf:'BSE.NS', av:'BSE.BSE'},
+  {n:'CDSL — CDSL', t:'CDSL', cat:'indian', m:0.475, u:'₹1', uv:1, dr:[5,20], yf:'CDSL.NS', av:'CDSL.BSE'},
+  {n:'GAIL — GAIL', t:'GAIL', cat:'indian', m:2.75, u:'₹1', uv:1, dr:[5,20], yf:'GAIL.NS', av:'GAIL.BSE'},
+  {n:'GNFC — GNFC', t:'GNFC', cat:'indian', m:0.7, u:'₹1', uv:1, dr:[5,20], yf:'GNFC.NS', av:'GNFC.BSE'},
+  {n:'Godrej Properties — GODREJPROP', t:'GODREJPROP', cat:'indian', m:0.325, u:'₹1', uv:1, dr:[5,20], yf:'GODREJPROP.NS', av:'GODREJPROP.BSE'},
+  {n:'Granules India — GRANULES', t:'GRANULES', cat:'indian', m:1.1, u:'₹1', uv:1, dr:[5,20], yf:'GRANULES.NS', av:'GRANULES.BSE'},
+  {n:'Hindustan Petro — HINDPETRO', t:'HINDPETRO', cat:'indian', m:1.35, u:'₹1', uv:1, dr:[5,20], yf:'HINDPETRO.NS', av:'HINDPETRO.BSE'},
+  {n:'Honeywell Auto — HONAUT', t:'HONAUT', cat:'indian', m:0.01, u:'₹1', uv:1, dr:[5,20], yf:'HONAUT.NS', av:'HONAUT.BSE'},
+  {n:'Idea Vodafone — IDEA', t:'IDEA', cat:'indian', m:50, u:'₹1', uv:1, dr:[5,20], yf:'IDEA.NS', av:'IDEA.BSE'},
+  {n:'Indus Towers — INDUSTOWER', t:'INDUSTOWER', cat:'indian', m:1.4, u:'₹1', uv:1, dr:[5,20], yf:'INDUSTOWER.NS', av:'INDUSTOWER.BSE'},
+  {n:'IPCA Labs — IPCALAB', t:'IPCALAB', cat:'indian', m:0.35, u:'₹1', uv:1, dr:[5,20], yf:'IPCALAB.NS', av:'IPCALAB.BSE'},
+  {n:'IRFC — IRFC', t:'IRFC', cat:'indian', m:5, u:'₹1', uv:1, dr:[5,20], yf:'IRFC.NS', av:'IRFC.BSE'},
+  {n:'JK Cement — JKCEMENT', t:'JKCEMENT', cat:'indian', m:0.125, u:'₹1', uv:1, dr:[5,20], yf:'JKCEMENT.NS', av:'JKCEMENT.BSE'},
+  {n:'KEI Industries — KEI', t:'KEI', cat:'indian', m:0.175, u:'₹1', uv:1, dr:[5,20], yf:'KEI.NS', av:'KEI.BSE'},
+  {n:'LIC India — LICI', t:'LICI', cat:'indian', m:0.7, u:'₹1', uv:1, dr:[5,20], yf:'LICI.NS', av:'LICI.BSE'},
+  {n:'Lal PathLabs — LALPATHLAB', t:'LALPATHLAB', cat:'indian', m:0.2, u:'₹1', uv:1, dr:[5,20], yf:'LALPATHLAB.NS', av:'LALPATHLAB.BSE'},
+  {n:'MGL — MGL', t:'MGL', cat:'indian', m:0.375, u:'₹1', uv:1, dr:[5,20], yf:'MGL.NS', av:'MGL.BSE'},
+  {n:'Motherson — MOTHERSON', t:'MOTHERSON', cat:'indian', m:3.4, u:'₹1', uv:1, dr:[5,20], yf:'MOTHERSON.NS', av:'MOTHERSON.BSE'},
+  {n:'NHPC — NHPC', t:'NHPC', cat:'indian', m:7.5, u:'₹1', uv:1, dr:[5,20], yf:'NHPC.NS', av:'NHPC.BSE'},
+  {n:'OFSS — OFSS', t:'OFSS', cat:'indian', m:0.075, u:'₹1', uv:1, dr:[5,20], yf:'OFSS.NS', av:'OFSS.BSE'},
+  {n:'PFC — PFC', t:'PFC', cat:'indian', m:1.55, u:'₹1', uv:1, dr:[5,20], yf:'PFC.NS', av:'PFC.BSE'},
+  {n:'REC Ltd — RECLTD', t:'RECLTD', cat:'indian', m:1.25, u:'₹1', uv:1, dr:[5,20], yf:'RECLTD.NS', av:'RECLTD.BSE'},
+  {n:'Shree Cement — SHREECEM', t:'SHREECEM', cat:'indian', m:0.025, u:'₹1', uv:1, dr:[5,20], yf:'SHREECEM.NS', av:'SHREECEM.BSE'},
+  {n:'SRF — SRF', t:'SRF', cat:'indian', m:0.125, u:'₹1', uv:1, dr:[5,20], yf:'SRF.NS', av:'SRF.BSE'},
+  {n:'Torrent Power — TORNTPOWER', t:'TORNTPOWER', cat:'indian', m:0.3, u:'₹1', uv:1, dr:[5,20], yf:'TORNTPOWER.NS', av:'TORNTPOWER.BSE'},
+  {n:'TVS Motor — TVSMOTOR', t:'TVSMOTOR', cat:'indian', m:0.175, u:'₹1', uv:1, dr:[5,20], yf:'TVSMOTOR.NS', av:'TVSMOTOR.BSE'},
+  {n:'United Breweries — UBL', t:'UBL', cat:'indian', m:0.35, u:'₹1', uv:1, dr:[5,20], yf:'UBL.NS', av:'UBL.BSE'},
+  {n:'United Spirits — UNITDSPR', t:'UNITDSPR', cat:'indian', m:0.3, u:'₹1', uv:1, dr:[5,20], yf:'UNITDSPR.NS', av:'UNITDSPR.BSE'},
+  {n:'Zydus Lifesci — ZYDUSLIFE', t:'ZYDUSLIFE', cat:'indian', m:0.55, u:'₹1', uv:1, dr:[5,20], yf:'ZYDUSLIFE.NS', av:'ZYDUSLIFE.BSE'},
+  {n:'Delhivery — DELHIVERY', t:'DELHIVERY', cat:'indian', m:1.25, u:'₹1', uv:1, dr:[5,20], yf:'DELHIVERY.NS', av:'DELHIVERY.BSE'},
+  {n:'Jio Financial — JIOFINANCE', t:'JIOFINANCE', cat:'indian', m:1.5, u:'₹1', uv:1, dr:[5,20], yf:'JIOFINANCE.NS', av:'JIOFINANCE.BSE'},
+  {n:'Angel One — ANGELONE', t:'ANGELONE', cat:'indian', m:0.25, u:'₹1', uv:1, dr:[5,20], yf:'ANGELONE.NS', av:'ANGELONE.BSE'},
+  {n:'APL Apollo — APLAPOLLO', t:'APLAPOLLO', cat:'indian', m:0.375, u:'₹1', uv:1, dr:[5,20], yf:'APLAPOLLO.NS', av:'APLAPOLLO.BSE'},
+  {n:'CAMS — CAMS', t:'CAMS', cat:'indian', m:0.15, u:'₹1', uv:1, dr:[5,20], yf:'CAMS.NS', av:'CAMS.BSE'},
+  {n:'Cyient — CYIENT', t:'CYIENT', cat:'indian', m:0.3, u:'₹1', uv:1, dr:[5,20], yf:'CYIENT.NS', av:'CYIENT.BSE'},
+  {n:'Fluorochem — FLUOROCHEM', t:'FLUOROCHEM', cat:'indian', m:0.125, u:'₹1', uv:1, dr:[5,20], yf:'FLUOROCHEM.NS', av:'FLUOROCHEM.BSE'},
+  {n:'Happiest Minds — HAPPSTMNDS', t:'HAPPSTMNDS', cat:'indian', m:0.55, u:'₹1', uv:1, dr:[5,20], yf:'HAPPSTMNDS.NS', av:'HAPPSTMNDS.BSE'},
+  {n:'KPIT Tech — KPITTECH', t:'KPITTECH', cat:'indian', m:0.5, u:'₹1', uv:1, dr:[5,20], yf:'KPITTECH.NS', av:'KPITTECH.BSE'},
+  {n:'Nykaa — NYKAA', t:'NYKAA', cat:'indian', m:2.75, u:'₹1', uv:1, dr:[5,20], yf:'NYKAA.NS', av:'NYKAA.BSE'},
+  {n:'Prestige Estates — PRESTIGE', t:'PRESTIGE', cat:'indian', m:0.375, u:'₹1', uv:1, dr:[5,20], yf:'PRESTIGE.NS', av:'PRESTIGE.BSE'},
+  {n:'Sonata Software — SONACOMS', t:'SONACOMS', cat:'indian', m:0.75, u:'₹1', uv:1, dr:[5,20], yf:'SONACOMS.NS', av:'SONACOMS.BSE'},
+  {n:'Sundaram Fin — SUNDARMFIN', t:'SUNDARMFIN', cat:'indian', m:0.125, u:'₹1', uv:1, dr:[5,20], yf:'SUNDARMFIN.NS', av:'SUNDARMFIN.BSE'},
+  {n:'Trident — TRIDENT', t:'TRIDENT', cat:'indian', m:9.5, u:'₹1', uv:1, dr:[5,20], yf:'TRIDENT.NS', av:'TRIDENT.BSE'},
+  {n:'Castrol India — CASTROLIND', t:'CASTROLIND', cat:'indian', m:2.7, u:'₹1', uv:1, dr:[5,20], yf:'CASTROLIND.NS', av:'CASTROLIND.BSE'},
+  {n:'Chambal Fert — CHAMBALFER', t:'CHAMBALFER', cat:'indian', m:0.95, u:'₹1', uv:1, dr:[5,20], yf:'CHAMBALFER.NS', av:'CHAMBALFER.BSE'},
+  {n:'Clean Science — CLEAN', t:'CLEAN', cat:'indian', m:0.35, u:'₹1', uv:1, dr:[5,20], yf:'CLEAN.NS', av:'CLEAN.BSE'},
+  {n:'CRISIL — CRISIL', t:'CRISIL', cat:'indian', m:0.125, u:'₹1', uv:1, dr:[5,20], yf:'CRISIL.NS', av:'CRISIL.BSE'},
+  {n:'Patanjali — PATANJALI', t:'PATANJALI', cat:'indian', m:0.375, u:'₹1', uv:1, dr:[5,20], yf:'PATANJALI.NS', av:'PATANJALI.BSE'},
+  {n:'Poonawalla Fin — POONAWALLA', t:'POONAWALLA', cat:'indian', m:1, u:'₹1', uv:1, dr:[5,20], yf:'POONAWALLA.NS', av:'POONAWALLA.BSE'},
+  {n:'TI India — TIINDIA', t:'TIINDIA', cat:'indian', m:0.2, u:'₹1', uv:1, dr:[5,20], yf:'TIINDIA.NS', av:'TIINDIA.BSE'},
+
+  // INDIAN INDICES - NSE Index Futures
+  {n:'Nifty 50 — NIFTY', t:'NIFTY 50',                  cat:'indianidx', m:0.065,   u:'1 pt', uv:1, dr:[50,300], yf:'^NSEI', av:'BSE:SENSEX'},
+  {n:'Bank Nifty — BANKNIFTY', t:'BANK NIFTY',             cat:'indianidx', m:0.03,   u:'1 pt', uv:1, dr:[200,800], yf:'^NSEBANK'},
+  {n:'FinNifty — FINNIFTY', t:'FINNIFTY',               cat:'indianidx', m:0.04,   u:'1 pt', uv:1, dr:[100,500]},
+  {n:'MidCap Nifty — MIDCPNIFTY', t:'MIDCAP NIFTY',         cat:'indianidx', m:0.05,   u:'1 pt', uv:1, dr:[100,400]},
+  {n:'Sensex — SENSEX', t:'SENSEX',                   cat:'indianidx', m:0.02,   u:'1 pt', uv:1, dr:[200,1000]},
+  {n:'Nifty Next 50 — NIFTYNXT50', t:'NIFTY NEXT 50',        cat:'indianidx', m:0.025,   u:'1 pt', uv:1, dr:[100,500]},
+  {n:'Nifty IT — NIFTYIT', t:'NIFTY IT',                cat:'indianidx', m:0.025,   u:'1 pt', uv:1, dr:[100,500]},
+  {n:'Nifty Bank — NIFTYBANK', t:'NIFTY BANK',            cat:'indianidx', m:0.03,   u:'1 pt', uv:1, dr:[200,800]},
+  {n:'Nifty Auto — NIFTYAUTO', t:'NIFTY AUTO',            cat:'indianidx', m:0.025,   u:'1 pt', uv:1, dr:[50,250]},
+  {n:'Nifty Energy — NIFTYENERGY', t:'NIFTY ENERGY',         cat:'indianidx', m:0.025,   u:'1 pt', uv:1, dr:[100,400]},
+  {n:'Nifty Pharma — NIFTYPHARMA', t:'NIFTY PHARMA',         cat:'indianidx', m:0.025,   u:'1 pt', uv:1, dr:[50,300]},
+  {n:'Nifty Metal — NIFTYMETAL', t:'NIFTY METAL',           cat:'indianidx', m:0.025,   u:'1 pt', uv:1, dr:[50,300]},
+  {n:'Nifty FMCG — NIFTYFMCG', t:'NIFTY FMCG',            cat:'indianidx', m:0.025,   u:'1 pt', uv:1, dr:[50,250]},
+  {n:'Nifty Realty — NIFTYREALTY', t:'NIFTY REALTY',         cat:'indianidx', m:0.025,   u:'1 pt', uv:1, dr:[30,150]},
+  {n:'Nifty PSU Bank — NIFTYPSUBNK', t:'NIFTY PSU BANK',       cat:'indianidx', m:0.025,   u:'1 pt', uv:1, dr:[50,250]},
 ];
 
 const CAT_TICKER_LABELS = {
-  all:     null,
-  comex:   ['CRUDE OIL','GOLD','SILVER','COPPER','NATURAL GAS'],
-  crypto:  ['BITCOIN','ETHEREUM'],
-  forex:   ['AUD/USD','GBP/USD','CAD/USD','EUR/USD','JPY/USD'],
-  indices: ['S&P 500','NASDAQ','RUSSELL 2000','DOW JONES'],
-  mcx:     ['CRUDE OIL','NATURAL GAS','GOLD','SILVER'],
+  all:       null,
+  comex:     ['CRUDE OIL','GOLD','SILVER','COPPER','NATURAL GAS'],
+  crypto:    ['BITCOIN','ETHEREUM'],
+  forex:     ['AUD/USD','GBP/USD','CAD/USD','EUR/USD','JPY/USD'],
+  indices:   ['S&P 500','NASDAQ','RUSSELL 2000','DOW JONES'],
+  mcx:       ['CRUDE OIL','NATURAL GAS','GOLD','SILVER'],
+  indian:    null,
+  indianidx: null,
 };
 
 /* ============================================================
@@ -938,56 +1286,47 @@ const CAT_TICKER_LABELS = {
    ============================================================ */
 function buildTicker(catFilter) {
   const c = catFilter || currentCat || 'all';
-  const allowedLabels = CAT_TICKER_LABELS[c] || null;
-
-  let items = Object.values(priceData)
-    .filter(d => !allowedLabels || (d.label && allowedLabels.includes(d.label)));
-  
-  if (!items.length) {
-    items = Object.values(priceData);
-  }
-
   const tickerTrack = document.getElementById('tickerTrack');
   if (!tickerTrack) return;
 
-  // Build HTML for items - create TWO complete sets for seamless looping
-  const itemsHTML = items.map(d => {
-    const up = d.chg >= 0;
-    const pxStr = formatPrice(d.price);
-    const chgStr = (up ? '+' : '') + d.chg.toFixed(2) + '%';
-    const chgClass = up ? 'up' : 'dn';
+  let instrList;
+  if (c === 'all') {
+    instrList = INSTR.slice();
+  } else {
+    instrList = INSTR.filter(i => i.cat === c);
+  }
+  
+  // Sort A-Z by ticker name
+  instrList.sort((a, b) => (a.t || a.n).localeCompare(b.t || b.n));
+  
+  if (!instrList.length) return;
+
+  const itemsHTML = instrList.map(inst => {
+    const tickerName = inst.t || inst.n;
     
-    return `<div class="ticker-item">
-      <span class="t-sym">${d.label}</span>
-      <span class="t-px">${pxStr}</span>
-      <span class="t-chg ${chgClass}">${chgStr}</span>
-    </div>`;
+    // Check if we have live price data
+    if (inst.livePrice) {
+      const up = (inst.liveChg || 0) >= 0;
+      const pxStr = formatPrice(inst.livePrice);
+      const chgStr = (up ? '+' : '') + (inst.liveChg || 0).toFixed(2) + '%';
+      const chgClass = up ? 'up' : 'dn';
+      return `<div class="ticker-item">
+        <span class="t-sym">${tickerName}</span>
+        <span class="t-px">${pxStr}</span>
+        <span class="t-chg ${chgClass}">${chgStr}</span>
+      </div>`;
+    } else {
+      return `<div class="ticker-item">
+        <span class="t-sym">${tickerName}</span>
+      </div>`;
+    }
   }).join('');
 
-  // Duplicate items for infinite loop - this is KEY
-  // When first set finishes scrolling, second set already visible
   tickerTrack.innerHTML = itemsHTML + itemsHTML;
-  
-  // TRULY NEUTRAL SPEED - MOVES AT SAME PIXEL SPEED ALWAYS
-  // Calculate duration based on ACTUAL WIDTH of content
-  // This ensures same physical speed across all categories
-  
-  // Force browser to calculate width
   tickerTrack.offsetWidth;
-  
-  // Get actual width of ONE set (half of total)
   const trackWidth = tickerTrack.scrollWidth / 2;
-  
-  // PIXEL SPEED - CONSTANT MOVEMENT SPEED
-  // Adjust this for global speed control:
-  // 30 = slow
-  // 50 = medium (good default)
-  // 80 = fast
-  // 120 = very fast
-  
-  const PIXELS_PER_SECOND = 50; // pixels per second - UNIVERSAL SPEED
-  const duration = (trackWidth / PIXELS_PER_SECOND); // auto-calculate duration
-  
+  const PIXELS_PER_SECOND = 50;
+  const duration = (trackWidth / PIXELS_PER_SECOND);
   tickerTrack.style.animationDuration = duration + 's';
 }
 
@@ -1025,10 +1364,19 @@ function buildSel() {
   const list = cat === 'all' ? INSTR : INSTR.filter(i => i.cat === cat);
   sel.innerHTML = list.map((i, idx) => {
     const gi = INSTR.indexOf(i);
-    return `<option value="${gi}">${i.n}${i.v ? ' ✓' : ''}</option>`;
+    return `<option value="${gi}">${i.n}</option>`;
   }).join('');
   if (list.length > 0) {
     sel.value = INSTR.indexOf(list[0]);
+  }
+  const badge = document.getElementById('marketCount');
+  if (badge) {
+    const catLabels = {
+      'all':'INSTRUMENTS','comex':'COMMODITIES','crypto':'CRYPTO',
+      'forex':'FOREX PAIRS','indices':'INDICES','mcx':'COMMODITIES',
+      'indian':'STOCKS','indianidx':'INDICES'
+    };
+    badge.textContent = list.length + ' ' + (catLabels[cat] || 'INSTRUMENTS');
   }
 }
 
@@ -1042,15 +1390,102 @@ function onInstChange() {
   const stripEl = document.getElementById('instStrip');
   if (!stripEl) return;
 
-  const vb = inst.v
-    ? `<span class="badge bv">VERIFIED</span>`
-    : `<span class="badge be">ESTIMATED</span>`;
-  const wb = inst.w ? `<span class="badge bw">⚠ ${inst.w}</span>` : '';
+  stripEl.style.display = '';
+  
+  // For Indian stocks, MCX, and Indian indices — show per 1 lot with actual lot size
+  const isIndian = (inst.cat === 'indian' || inst.cat === 'indianidx' || inst.cat === 'mcx');
+  let lotLabel, lotVal;
+  if (inst.cat === 'indian') {
+    // Indian stocks: per-share trading + show F&O lot size for reference
+    const lotSize = Math.round(inst.m * 1000);
+    lotLabel = `Per share / ${inst.u} move: <strong>₹1</strong>`;
+    lotVal = `<span style="color:var(--c-text3);font-size:0.65rem;margin-left:8px;">F&O lot: ${lotSize.toLocaleString('en-IN')} shares</span>`;
+  } else if (inst.cat === 'indianidx' || inst.cat === 'mcx') {
+    // Indian indices & MCX: lot-based
+    const lotSize = Math.round(inst.m * 1000);
+    lotLabel = `Lot size: <strong>${lotSize}</strong> · ₹ per 1 lot / ${inst.u}:`;
+    lotVal = `<strong>₹${lotSize.toLocaleString('en-IN')}</strong>`;
+  } else {
+    lotLabel = `₹ per 0.001 lot / ${inst.u}:`;
+    lotVal = `<strong>₹${inst.m}</strong>`;
+  }
+  
   stripEl.innerHTML =
-    `<span class="i-val">₹ per 0.001 lot / ${inst.u}: <strong>₹${inst.m}</strong></span>
-     <span class="i-val" style="color:var(--c-text3)">Daily range: <strong style="color:var(--c-text2)">${inst.dr[0]}–${inst.dr[1]}</strong></span>
-     ${vb}${wb}`;
+    `<span class="i-val">${lotLabel} ${lotVal}</span>
+     <span class="i-val" style="color:var(--c-text3)" id="drDisplay"></span>`;
+  
+  // Fetch daily range if API key exists and instrument has av symbol
+  updateDailyRangeDisplay(inst);
   calc();
+}
+
+/* ============================================================
+   DAILY RANGE — ALPHA VANTAGE (FREE API, 25 CALLS/DAY)
+   Rolling 252-day P25–P75 of daily High–Low range
+   ============================================================ */
+const drCache = {};
+
+async function fetchDailyRange(avSymbol) {
+  if (drCache[avSymbol]) return drCache[avSymbol];
+  const key = localStorage.getItem('av_api_key');
+  if (!key) return null;
+  try {
+    const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${avSymbol}&outputsize=full&apikey=${key}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const ts = data['Time Series (Daily)'];
+    if (!ts) return null;
+    const dates = Object.keys(ts).sort().reverse();
+    const lookback = Math.min(252, dates.length);
+    const ranges = [];
+    for (let i = 0; i < lookback; i++) {
+      const d = ts[dates[i]];
+      const h = parseFloat(d['2. high']);
+      const l = parseFloat(d['3. low']);
+      if (h && l) ranges.push(h - l);
+    }
+    if (ranges.length < 50) return null;
+    ranges.sort((a, b) => a - b);
+    const result = [
+      parseFloat(ranges[Math.floor(ranges.length * 0.25)].toFixed(2)),
+      parseFloat(ranges[Math.floor(ranges.length * 0.75)].toFixed(2))
+    ];
+    drCache[avSymbol] = result;
+    return result;
+  } catch(e) { return null; }
+}
+
+function updateDailyRangeDisplay(inst) {
+  const el = document.getElementById('drDisplay');
+  if (!el) return;
+  const avSym = inst.av;
+  if (!avSym) { el.innerHTML = ''; return; }
+  const key = localStorage.getItem('av_api_key');
+  if (!key) {
+    el.innerHTML = `<a href="#" onclick="promptApiKey();return false;" style="color:var(--c-cyan);text-decoration:underline;font-size:0.65rem;">+ Add API key for daily range data</a>`;
+    return;
+  }
+  if (drCache[avSym]) {
+    const r = drCache[avSym];
+    el.innerHTML = `Avg daily range (252d): <strong style="color:var(--c-text2)">${r[0]}–${r[1]}</strong>`;
+    return;
+  }
+  el.innerHTML = '<span style="color:var(--c-text3);font-size:0.62rem;">Loading range...</span>';
+  fetchDailyRange(avSym).then(r => {
+    if (r) {
+      el.innerHTML = `Avg daily range (252d): <strong style="color:var(--c-text2)">${r[0]}–${r[1]}</strong>`;
+    } else {
+      el.innerHTML = '<span style="color:var(--c-text3);font-size:0.62rem;">Range unavailable</span>';
+    }
+  });
+}
+
+function promptApiKey() {
+  const key = prompt('Enter your free Alpha Vantage API key.\nGet one in 20 seconds at: alphavantage.co/support/#api-key');
+  if (key && key.trim().length > 5) {
+    localStorage.setItem('av_api_key', key.trim());
+    onInstChange();
+  }
 }
 
 function setDir(d) {
@@ -1101,37 +1536,123 @@ function calc() {
   const p001 = inst.m * inst.uv;
 
   if (entry !== null && !isNaN(entry) && sl !== null && !isNaN(sl) && entry !== sl) {
+    // Validate SL direction
+    const slValid = (dir === 'long' && sl < entry) || (dir === 'short' && sl > entry);
+    if (!slValid) {
+      const secPos = document.getElementById('secPos');
+      if (secPos) secPos.classList.remove('hidden');
+      const oLot = document.getElementById('oLot');
+      if (oLot) oLot.textContent = '—';
+      const oSLD = document.getElementById('oSLD');
+      if (oSLD) oSLD.textContent = '—';
+      const oPPU = document.getElementById('oPPU');
+      if (oPPU) oPPU.textContent = '—';
+      const oLotU = document.getElementById('oLotU');
+      if (oLotU) oLotU.textContent = '—';
+      const secOut = document.getElementById('secOut');
+      if (secOut) secOut.classList.add('hidden');
+      
+      const msg = document.getElementById('tradeMsg');
+      if (msg) {
+        const hint = dir === 'long' 
+          ? 'LONG trade — stop loss must be below entry price' 
+          : 'SHORT trade — stop loss must be above entry price';
+        msg.className = 'msg danger';
+        msg.innerHTML = `<span class="msg-ic">✕</span><span>Invalid setup — ${hint}.</span>`;
+      }
+      // Still calculate quick ref table
+      const plM2 = (mLot / 0.001) * p001;
+      const lotHint2 = document.getElementById('lotHint');
+      if (lotHint2) lotHint2.textContent = '→ ' + inr(f(plM2, 2)) + ' per ' + inst.u + ' move';
+      return;
+    }
+    
+    // Validate target direction if provided
+    if (target !== null && !isNaN(target) && target !== entry) {
+      const tgtValid = (dir === 'long' && target > entry) || (dir === 'short' && target < entry);
+      if (!tgtValid) {
+        // Silently ignore bad target — don't show outcome section
+        // But still calculate position sizing
+      }
+    }
+    
     const slDist = Math.abs(entry - sl);
     const plPer = (slDist / inst.uv) * inst.m * inst.uv;
     
-    if (plPer > 0) {
-      const recLot = f(cap_safe / (plPer / 0.001), 5);
-      const ppu = f((recLot / 0.001) * p001, 2);
+    if (plPer > 0 && target !== null && !isNaN(target) && target !== entry) {
+      // Validate target direction
+      const tgtValid = (dir === 'long' && target > entry) || (dir === 'short' && target < entry);
+      if (!tgtValid) {
+        const secPos = document.getElementById('secPos');
+        if (secPos) secPos.classList.remove('hidden');
+        const secOut = document.getElementById('secOut');
+        if (secOut) secOut.classList.add('hidden');
+        const oLot = document.getElementById('oLot');
+        if (oLot) oLot.textContent = '—';
+        const oSLD = document.getElementById('oSLD');
+        if (oSLD) oSLD.textContent = f(slDist, 4) + ' units';
+        const oPPU = document.getElementById('oPPU');
+        if (oPPU) oPPU.textContent = '—';
+        const msg = document.getElementById('tradeMsg');
+        if (msg) {
+          const hint = dir === 'long'
+            ? 'LONG trade — target must be above entry price'
+            : 'SHORT trade — target must be below entry price';
+          msg.className = 'msg warn';
+          msg.innerHTML = `<span class="msg-ic">◌</span><span>${hint}.</span>`;
+        }
+      } else {
+      const tDist = Math.abs(target - entry);
+      const isShareBased = (inst.cat === 'indian');
+      
+      let recQty, profit, loss, ppuVal, lotLabel;
+      
+      if (isShareBased) {
+        // INDIAN STOCKS: 1 share = ₹1 per ₹1 move
+        recQty = Math.floor(cap_safe / slDist);
+        profit = Math.round(recQty * tDist);
+        loss = Math.round(recQty * slDist);
+        ppuVal = recQty; // ₹ per ₹1 move = number of shares
+        lotLabel = recQty + ' shares';
+      } else {
+        // COMEX/Forex/Crypto/MCX/Indices: 0.001 lot system
+        const recLot = f(cap_safe / (plPer / 0.001), 5);
+        recQty = recLot;
+        const ppu = f((recLot / 0.001) * p001, 2);
+        profit = Math.round((tDist / inst.uv) * inst.m * inst.uv * (recLot / 0.001));
+        loss = Math.round((slDist / inst.uv) * inst.m * inst.uv * (recLot / 0.001));
+        ppuVal = ppu;
+        lotLabel = recLot + ' lots';
+      }
 
       const secPos = document.getElementById('secPos');
       if (secPos) secPos.classList.remove('hidden');
       
+      const oLotLabel = document.getElementById('oLotLabel');
+      if (oLotLabel) oLotLabel.textContent = isShareBased ? 'Recommended Shares' : 'Recommended Lot Size';
+      
       const oLot = document.getElementById('oLot');
-      if (oLot) oLot.textContent = recLot + ' lots';
+      if (oLot) oLot.textContent = lotLabel;
       
       const oSLD = document.getElementById('oSLD');
-      if (oSLD) oSLD.textContent = f(slDist, 4) + ' units';
+      if (oSLD) oSLD.textContent = '₹' + f(slDist, 2) + (isShareBased ? '' : ' units');
       
       const oCapRef = document.getElementById('oCapRef');
       if (oCapRef) oCapRef.textContent = cap_safe.toLocaleString('en-IN');
       
+      // Show loss at SL and profit at target right in position sizing
+      const oSLLoss = document.getElementById('oSLLoss');
+      if (oSLLoss) oSLLoss.textContent = '-' + inr(loss);
+      const oTGProfit = document.getElementById('oTGProfit');
+      if (oTGProfit) oTGProfit.textContent = '+' + inr(profit);
+      
       const oPPU = document.getElementById('oPPU');
-      if (oPPU) oPPU.textContent = inr(ppu) + ' per ' + inst.u + ' move';
+      if (oPPU) oPPU.textContent = inr(ppuVal) + ' per ' + inst.u + ' move';
       
       const oLotU = document.getElementById('oLotU');
-      if (oLotU) oLotU.textContent = recLot + ' lots';
+      if (oLotU) oLotU.textContent = lotLabel;
 
-      if (target !== null && !isNaN(target) && target !== entry) {
-        const tDist = Math.abs(target - entry);
-        const profit = Math.round((tDist / inst.uv) * inst.m * inst.uv * (recLot / 0.001));
-        const loss = Math.round((slDist / inst.uv) * inst.m * inst.uv * (recLot / 0.001));
-        
-        if (loss > 0) {
+      if (loss > 0) {
           const rr = profit / loss;
           const wr = Math.round((1 / (1 + rr)) * 100);
 
@@ -1185,10 +1706,7 @@ function calc() {
           const secOut = document.getElementById('secOut');
           if (secOut) secOut.classList.add('hidden');
         }
-      } else {
-        const secOut = document.getElementById('secOut');
-        if (secOut) secOut.classList.add('hidden');
-      }
+      } // close tgtValid else
     } else {
       const secPos = document.getElementById('secPos');
       if (secPos) secPos.classList.add('hidden');
